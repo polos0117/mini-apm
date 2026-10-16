@@ -39,11 +39,11 @@ agent-java/
   src/apm/SqlAdvice.java      Statement/PreparedStatement execute* 앞뒤
   src/apm/PrepareAdvice.java  Connection.prepareStatement(String, ...) 반환값에 SQL 연결
   test/TestApp.java           자동 테스트용 앱 (내장 Tomcat + Derby)
-  build.mjs                   javac + jar → agent-java/dist/mini-apm-agent.jar
-test/java-agent.test.mjs      자동 테스트 (기존 npm test에 포함)
+  build.js                    javac + jar → agent-java/dist/mini-apm-agent.jar (require하면 build() 등을 내보냄)
+test/java-agent.test.js       자동 테스트 (기존 npm test에 포함)
 ```
 
-`package.json`에 `"build:java": "node agent-java/build.mjs"`를 추가한다. `agent-java/dist/`와 `agent-java/build/`는 `.gitignore`에 넣는다.
+`package.json`에 `"build:java": "node agent-java/build.js"`를 추가한다. `agent-java/dist/`와 `agent-java/build/`는 `.gitignore`에 넣는다.
 
 ## 계측 지점
 
@@ -59,14 +59,15 @@ test/java-agent.test.mjs      자동 테스트 (기존 npm test에 포함)
 
 ### SQL
 
-- **계측 대상**: `java.sql.Statement`를 구현한, 추상 클래스가 아닌 모든 클래스의 메서드 `execute`, `executeQuery`, `executeUpdate`, `executeBatch`, `executeLargeUpdate`, `executeLargeBatch`.
+- **계측 대상**: `java.sql.Statement`를 구현한 모든 클래스(인터페이스 제외, 추상 클래스 포함)에서 몸체가 있는 메서드 `execute`, `executeQuery`, `executeUpdate`, `executeBatch`, `executeLargeUpdate`, `executeLargeBatch`.
 - **가장 바깥 호출만 기록**: 이 앱의 SQL 호출은 Hikari 프록시 → log4jdbc → MariaDB로 겹쳐 있다. 스레드별 깊이 카운터를 두고 깊이 0에서 들어온 호출만 기록한다.
 - **SQL 문장을 얻는 방법**
   - `Statement.execute*(String sql, ...)`: 첫 인자를 쓴다.
   - `PreparedStatement`: `Connection.prepareStatement(String, ...)`를 계측해서, 반환된 문장 객체와 SQL을 약한 참조 맵(`Collections.synchronizedMap(new WeakHashMap<>())`)에 넣어 둔다. 실행 시 이 맵에서 찾는다.
     - Hikari나 log4jdbc 프록시가 반환한 바깥 객체도 같은 `prepareStatement` 계측을 거치므로 맵에 들어간다. 그래서 가장 바깥 실행 객체로 찾을 수 있다.
     - 못 찾으면 문장을 `?`로 기록한다.
-  - `prepareStatement`를 구현한, 추상 클래스가 아닌 `java.sql.Connection` 구현 클래스를 계측한다. 가장 바깥 호출만 맵에 넣을 필요는 없으므로 모든 겹에서 넣는다.
+  - `java.sql.Connection` 구현 클래스(인터페이스 제외, 추상 클래스 포함)의 몸체가 있는 `prepareStatement(String, ...)`, `prepareCall(String, ...)`를 계측한다. 모든 겹에서 맵에 넣는다.
+  - 추상 클래스를 포함하는 이유: Hikari의 `ProxyPreparedStatement`·`ProxyConnection`은 추상 클래스지만 실행 메서드를 직접 구현한다.
 - **문장 정리**: 연속된 공백은 공백 하나로 줄인다. 앞뒤 공백을 자른다. 1,000자를 넘으면 1,000자에서 자른다.
 
 ## 트랜잭션과 구간 기록 (`Tracer`)
@@ -105,8 +106,10 @@ Node 에이전트와 같은 필드를 쓴다.
 
 ### 처리 중 목록 항목
 
+Node 에이전트와 같은 형식이다. `lastSpan`은 마지막 구간의 문장이고, 없으면 `null`이다.
+
 ```json
-{ "id": "uuid", "name": "GET /x.do", "agent": "ipfinance", "elapsed": 812.0 }
+{ "id": "uuid", "name": "GET /x.do", "elapsed": 812.0, "lastSpan": "select ..." }
 ```
 
 ## 전송
@@ -140,12 +143,12 @@ Node 에이전트와 같은 필드를 쓴다.
 - JDK 내부 클래스(부트스트랩 클래스로더)는 계측하지 않는다.
 - Byte Buddy는 패키지 이름을 바꾸지 않고 jar에 넣는다. 앱 클래스패스에 Byte Buddy가 있더라도 Spring Boot 2.4.3이 관리하는 버전이 같은 1.10.20이다.
 
-## 빌드 (`agent-java/build.mjs`)
+## 빌드 (`agent-java/build.js`)
 
 1. JDK 경로는 `APM_JAVA_HOME`이다. 기본값은 `D:/AnyBuilder/bin/java/jdk1.8.0_102-x64`.
 2. Byte Buddy jar 경로는 `APM_BYTEBUDDY_JAR`이다. 기본값은 `D:/AnyBuilder/data/.tool/maven/repository/net/bytebuddy/byte-buddy/1.10.20/byte-buddy-1.10.20.jar`.
 3. `agent-java/build/classes`를 비운다.
-4. `javac -source 8 -target 8 -encoding UTF-8 -cp <bytebuddy> -d build/classes src/apm/*.java`로 컴파일한다.
+4. `javac -source 8 -target 8 -encoding UTF-8 -cp <bytebuddy>;<tomcat-embed-core 9.0.43> -d build/classes src/apm/*.java`로 컴파일한다. tomcat-embed-core는 `RequestAdvice`가 쓰는 `javax.servlet.http` 타입 때문에 컴파일 때만 쓰고 jar에는 넣지 않는다.
 5. `build/classes`에서 `jar xf <bytebuddy>`로 Byte Buddy 클래스를 푼다. 그 jar의 `META-INF/MANIFEST.MF`는 지운다.
 6. 매니페스트에 `Premain-Class: apm.Agent`와 `Can-Retransform-Classes: true`를 쓴다.
 7. `jar cfm agent-java/dist/mini-apm-agent.jar <manifest> -C build/classes .`로 묶는다.
@@ -154,11 +157,12 @@ JDK나 Byte Buddy jar가 없으면 경로를 알려 주는 메시지를 출력�
 
 ## 테스트
 
-### 자동 테스트 (`test/java-agent.test.mjs`)
+### 자동 테스트 (`test/java-agent.test.js`)
 
 - **건너뛰는 경우**: `APM_JAVA_HOME`(기본값 포함)에 `bin/javac`가 없으면 전체를 `skip`한다.
+- TestApp은 `-Dfile.encoding=UTF-8`로 띄운다. Java 8 콘솔 인코딩이 cp949라서, 이 옵션이 없으면 한글 메시지를 비교할 수 없다.
 - **준비**
-  1. `build.mjs`로 jar를 만든다.
+  1. `build.js`의 `build()`로 jar를 만든다.
   2. `TestApp.java`를 컴파일한다. 클래스패스는 tomcat-embed-core 9.0.43, tomcat-annotations-api 9.0.43, Derby이다.
   3. 실제 수집 서버를 띄운다. 기존 `createCollector()`를 임의 포트로 쓴다.
   4. TestApp을 `-javaagent`와 함께 띄운다. `APM_COLLECTOR`, `APM_AGENT=test`, `APM_INTERVAL=200`을 준다.
