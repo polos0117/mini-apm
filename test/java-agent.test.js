@@ -142,4 +142,32 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     const lines = dead.stderr.split('\n').filter((l) => l.includes('[apm] 전송 실패'));
     assert.equal(lines.length, 1, dead.stderr);
   });
+
+  test('PreparedStatement 실행이 SQL 구간 하나로 기록되고 문장은 공백이 정리된다', async () => {
+    assert.equal(await get('/ok'), 200);
+    const tx = await waitTx('GET /ok');
+    assert.equal(tx.status, 200);
+    assert.equal(tx.spans.length, 1);
+    const [s] = tx.spans;
+    assert.equal(s.type, 'sql');
+    assert.equal(s.text, `select name from item where id = ? and name <> 'q"\\'`);
+    assert.equal(s.error, null);
+    assert.ok(s.offset >= 0 && s.elapsed >= 0 && s.offset + s.elapsed <= tx.elapsed + 0.2);
+  });
+
+  test('실패한 SQL은 구간 하나에 에러가 남고, 트랜잭션 에러가 된다', async () => {
+    assert.equal(await get('/fail'), 500);
+    const tx = await waitTx('GET /fail');
+    assert.equal(tx.status, 500);
+    assert.equal(tx.spans.length, 1); // Derby 안의 execute 중첩은 바깥 하나만
+    assert.equal(tx.spans[0].text, 'select * from missing_table');
+    assert.match(tx.spans[0].error, /MISSING_TABLE/);
+    assert.equal(tx.error, tx.spans[0].error);
+  });
+
+  test('요청 밖에서 실행된 SQL(기동 시 create table)은 어디에도 기록되지 않는다', () => {
+    for (const p of store.points(0)) {
+      for (const s of store.get(p.id).spans) assert.doesNotMatch(s.text, /create table|insert into/);
+    }
+  });
 });

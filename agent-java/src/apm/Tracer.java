@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 // 트랜잭션과 구간을 기록하고 1초마다 수집 서버로 보낸다. 형식은 Node 에이전트(agent/index.js)와 같다.
@@ -34,6 +35,10 @@ public final class Tracer {
   private static final Map<String, Tx> OPEN = new ConcurrentHashMap<>(); // 처리 중
   private static List<Tx> done = new ArrayList<>();                     // 전송 대기. Tracer.class로 잠근다
   private static boolean failing;                                        // 전송 스레드만 쓴다
+  // SQL은 Hikari 프록시 → log4jdbc → 드라이버로 겹쳐 불린다. 가장 바깥 호출만 기록하려고 스레드별 깊이를 센다.
+  private static final ThreadLocal<int[]> DEPTH = ThreadLocal.withInitial(() -> new int[1]);
+  // PreparedStatement는 SQL을 꺼낼 방법이 없어서, prepareStatement 때 문장 객체와 SQL을 묶어 둔다.
+  private static final Map<Object, String> SQL = Collections.synchronizedMap(new WeakHashMap<Object, String>());
 
   public static final class Tx {
     final String id = UUID.randomUUID().toString();
@@ -104,6 +109,41 @@ public final class Tracer {
       done.add(tx);
       if (done.size() > MAX_BUFFER) done.subList(0, done.size() - MAX_BUFFER).clear();
     }
+  }
+
+  public static void remember(Object stmt, String sql) {
+    if (stmt != null && sql != null) SQL.put(stmt, sql);
+  }
+
+  public static Span sqlStart(Object stmt, Object[] args) {
+    int[] depth = DEPTH.get();
+    if (depth[0]++ > 0) return null;
+    try {
+      Tx tx = CURRENT.get();
+      if (tx == null) return null; // 요청 밖의 SQL
+      if (tx.spans.size() >= MAX_SPANS) {
+        tx.dropped++;
+        return null;
+      }
+      String sql = args.length > 0 && args[0] instanceof String ? (String) args[0] : SQL.get(stmt);
+      Span s = new Span(sql == null ? "?" : normalize(sql), ms(System.nanoTime() - tx.t0));
+      tx.spans.add(s);
+      return s;
+    } catch (Throwable t) {
+      return null;
+    }
+  }
+
+  public static void sqlEnd(Span s, Throwable thrown) {
+    DEPTH.get()[0]--;
+    if (s == null) return;
+    s.elapsed = ms(System.nanoTime() - s.t0);
+    if (thrown != null) s.error = thrown.getMessage() != null ? thrown.getMessage() : thrown.getClass().getName();
+  }
+
+  static String normalize(String sql) {
+    String s = sql.replaceAll("\\s+", " ").trim();
+    return s.length() > MAX_SQL ? s.substring(0, MAX_SQL) : s;
   }
 
   public static void startSender(final long intervalMs) {

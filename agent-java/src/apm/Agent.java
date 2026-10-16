@@ -1,9 +1,17 @@
 package apm;
 
+import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
+import static net.bytebuddy.matcher.ElementMatchers.isInterface;
+import static net.bytebuddy.matcher.ElementMatchers.isSubTypeOf;
 import static net.bytebuddy.matcher.ElementMatchers.named;
+import static net.bytebuddy.matcher.ElementMatchers.namedOneOf;
+import static net.bytebuddy.matcher.ElementMatchers.not;
+import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
 import java.lang.instrument.Instrumentation;
+import java.sql.Connection;
+import java.sql.Statement;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.utility.JavaModule;
@@ -35,6 +43,15 @@ public final class Agent {
         .type(named("org.apache.catalina.core.StandardHostValve"))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(RequestAdvice.class).on(named("invoke").and(takesArguments(2)))))
+        // 추상 클래스도 포함한다. Hikari의 ProxyPreparedStatement·ProxyConnection은 추상 클래스지만 실행 메서드를 직접 구현한다.
+        .type(isSubTypeOf(Statement.class).and(not(isInterface())))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(SqlAdvice.class).on(not(isAbstract()).and(namedOneOf(
+                "execute", "executeQuery", "executeUpdate", "executeBatch", "executeLargeUpdate", "executeLargeBatch")))))
+        .type(isSubTypeOf(Connection.class).and(not(isInterface())))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(PrepareAdvice.class).on(not(isAbstract())
+                .and(namedOneOf("prepareStatement", "prepareCall")).and(takesArgument(0, String.class)))))
         .installOn(inst);
 
     Tracer.startSender(interval);
