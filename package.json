@@ -1,0 +1,10 @@
+{
+  "name": "mini-apm",
+  "private": true,
+  "description": "JENNIFER 같은 APM을 작게 만들어 보는 학습용 프로젝트",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "test": "node --test",
+    "demo": "node demo.js"
+  }
+}

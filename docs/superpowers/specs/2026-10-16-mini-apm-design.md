@@ -64,6 +64,7 @@ SQL·fetch 래퍼는 `als.getStore()`로 현재 트랜잭션을 찾아 `spans`�
 
 - 끝난 트랜잭션을 버퍼에 모아 1초마다 `POST http://localhost:7700/ingest`로 `{ agent: 'sample', txs, active }`를 보낸다.
 - 수집 서버 주소는 환경변수 `APM_COLLECTOR`, 전송 주기는 `APM_INTERVAL`(ms, 기본 1000)로 바꿀 수 있다(테스트용).
+- 트랜잭션당 span은 1,000개까지 기록하고, 넘는 호출은 `droppedSpans`에 개수만 센다(대시보드 상세에 "호출 N개 생략").
 - 버퍼 최대 5,000건, 넘으면 오래된 것부터 버린다. 전송 실패 시 그 묶음은 버린다.
 - 전송용 fetch는 원래 fetch를 써서 자기 자신을 계측하지 않는다.
 
