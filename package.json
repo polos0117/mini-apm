@@ -5,6 +5,7 @@
   "engines": { "node": ">=22.13" },
   "scripts": {
     "test": "node --test",
-    "demo": "node demo.js"
+    "demo": "node demo.js",
+    "build:java": "node agent-java/build.js"
   }
 }
