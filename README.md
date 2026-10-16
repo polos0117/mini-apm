@@ -1,7 +1,7 @@
 # 미니 APM
 
 JENNIFER 같은 APM(애플리케이션 성능 모니터링)이 어떻게 동작하는지 직접 만들어 보는 학습용 프로젝트.
-Node 22 기본 기능만 쓴다(외부 라이브러리 없음).
+Node 22 기본 기능만 쓴다(외부 라이브러리 없음). Java 에이전트만 Byte Buddy를 jar에 담아 쓴다.
 
 ## 실행
 
@@ -47,6 +47,38 @@ Git Bash에서는 `fnm exec --using=22 node demo.js`, `fnm exec --using=22 npm.c
 ### 직접 확인해 볼 APM의 맹점
 
 `node:sqlite`는 동기식이라 느린 SQL이 도는 동안 다른 요청은 소켓에서 기다린다. 그런데 에이전트는 `'request'` 이벤트가 온 순간부터 재기 때문에, **그 대기 시간은 응답시간에 잡히지 않는다**(`/products`는 화면상 1ms 안팎이지만 실제 사용자는 수백 ms를 기다린다). 대신 이미 진행 중이던 외부 호출은 응답을 처리할 차례가 늦게 와서 **실제보다 길게** 측정된다(결제 서비스는 최대 2초인데 `/checkout`의 외부 구간이 3~4초로 찍힌다). 앱 안에서 재는 APM이 무엇을 볼 수 있고 무엇을 못 보는지 생각해 보기 좋은 지점이다.
+
+## Java 에이전트 (`agent-java/`)
+
+같은 수집 서버·대시보드를 Java 앱에 붙인다.
+- `-javaagent`로 앱 소스를 고치지 않고, 클래스가 로드될 때 바이트코드에 계측 코드를 끼워 넣는다. JENNIFER와 같은 방식이다.
+- 대상은 Java 8 이상의 내장 Tomcat 앱(Spring Boot 2.x)이다.
+
+```powershell
+npm run build:java        # agent-java/dist/mini-apm-agent.jar
+node collector/server.js  # 수집 서버만 따로 띄울 때
+```
+
+Eclipse 실행 설정(Run Configurations → 해당 Application)에 두 가지를 넣는다.
+- **Arguments → VM arguments**: `-javaagent:C:/Users/jjshs/mini-apm/agent-java/dist/mini-apm-agent.jar`
+- **Environment**: `APM_AGENT=ipfinance` (대시보드에 표시될 이름)
+
+앱 콘솔에 `[apm] mini-apm agent → ...` 한 줄이 보이면 붙은 것이다.
+
+빌드는 JDK 8(`APM_JAVA_HOME`)과 Byte Buddy 1.10.20(`APM_BYTEBUDDY_JAR`)을 쓴다. 기본값은 `D:\AnyBuilder` 아래 경로다.
+
+| 에이전트 | JENNIFER | 여기서 배우는 것 |
+|---|---|---|
+| `Agent.premain` | `-javaagent` | 앱 main보다 먼저 실행되는 진입점 |
+| `RequestAdvice` → `StandardHostValve.invoke` | 서블릿 트랜잭션 계측 | 어느 지점을 감싸야 필터 시간까지 잡히는가 |
+| `SqlAdvice` + 깊이 카운터 | JDBC 계측 | 커넥션 풀·로깅 프록시가 겹쳐도 SQL 하나를 한 번만 세는 법 |
+| `PrepareAdvice` | SQL 문장 수집 | `PreparedStatement`에서 SQL을 얻으려면 만들 때 잡아야 한다 |
+
+### Java 에이전트의 한계
+- **비동기 컨트롤러**: `DeferredResult`나 `CompletableFuture`를 반환하는 컨트롤러는 처리 스레드가 바뀐다. 그러면 SQL 구간을 놓친다. 트랜잭션은 스레드에 붙어 있기 때문이다.
+- **외부 호출**: `HttpURLConnection`, OkHttp는 계측하지 않는다. 그 시간은 "앱 자체 처리"에 섞인다.
+- **정적 파일 판단**: 확장자(`js css png jpg gif svg ico woff woff2 map`)로만 판단한다.
+- **요청 밖의 SQL**: Quartz 배치처럼 요청 밖에서 도는 SQL은 기록하지 않는다.
 
 ## 다음 학습 후보
 
