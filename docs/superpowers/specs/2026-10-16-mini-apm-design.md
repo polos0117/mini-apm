@@ -43,7 +43,7 @@ JENNIFER 같은 APM(애플리케이션 성능 모니터링)이 어떻게 동작�
 - `id`: 에이전트 안에서 고유한 문자열 (`crypto.randomUUID()`).
 - `name`: `메서드 + 경로`(쿼리스트링 제외).
 - `start`: 시작 시각(`Date.now()`, ms). `elapsed`: 걸린 시간(ms, `performance.now()` 차이).
-- `error`: 예외 메시지 또는 `null`. 상태 코드 500 이상이면 에러로 본다.
+- `error`: 상태 코드 500 이상이면 에러. 값은 마지막으로 실패한 span의 메시지, 없으면 `HTTP <상태>`. 아니면 `null`. (앱이 예외를 잡아 500으로 응답하므로 에이전트는 상태 코드로 에러를 안다. 처리기 밖으로 던져진 예외는 Node 기본 동작대로 둔다.) span의 `error`는 SQL·fetch가 던진 예외 메시지, 또는 fetch 응답이 500 이상이면 `HTTP <상태>`.
 - span의 `offset`: 트랜잭션 시작부터 그 호출 시작까지의 ms.
 
 ### 가로채는 지점
@@ -63,7 +63,7 @@ SQL·fetch 래퍼는 `als.getStore()`로 현재 트랜잭션을 찾아 `spans`�
 ### 전송
 
 - 끝난 트랜잭션을 버퍼에 모아 1초마다 `POST http://localhost:7700/ingest`로 `{ agent: 'sample', txs, active }`를 보낸다.
-- 수집 서버 주소는 환경변수 `APM_COLLECTOR`로 바꿀 수 있다(테스트용).
+- 수집 서버 주소는 환경변수 `APM_COLLECTOR`, 전송 주기는 `APM_INTERVAL`(ms, 기본 1000)로 바꿀 수 있다(테스트용).
 - 버퍼 최대 5,000건, 넘으면 오래된 것부터 버린다. 전송 실패 시 그 묶음은 버린다.
 - 전송용 fetch는 원래 fetch를 써서 자기 자신을 계측하지 않는다.
 
@@ -91,13 +91,13 @@ SQL·fetch 래퍼는 `als.getStore()`로 현재 트랜잭션을 찾아 `spans`�
 
 ### 초당 통계
 
-받은 트랜잭션을 **끝난 시각의 초** 단위로 묶어 `{ t, tps, avg, p95, errors }`를 계산한다. p95는 그 초의 응답시간을 정렬해 `ceil(0.95 × n) − 1`번째 값(n=0이면 0). 최근 10분 치 보관.
+받은 트랜잭션을 **끝난 시각의 초** 단위로 묶어 `{ t, tps, avg, p95, errors }`를 계산한다. p95는 그 초의 응답시간을 정렬해 `ceil(0.95 × n) − 1`번째 값(n=0이면 0). 별도 보관 없이 저장된 트랜잭션에서 그때그때 계산한다.
 
 ### SSE 메시지
 
 ```js
-{ points: [{ id, t, elapsed, error }],   // t = 끝난 시각(ms), error = true/false
-  stats: { tps, avg, p95, errors },       // 직전에 마감된 1초
+{ points: [{ id, name, t, elapsed, error }],   // t = 끝난 시각(ms), error = true/false
+  stats: { tps, avg, p95, errors },       // 2초 전의 1초 (에이전트가 1초마다 묶어 보내므로 늦게 도착하는 몫을 기다린다)
   active: [{ id, name, elapsed, lastSpan }] }
 ```
 
@@ -141,7 +141,7 @@ PC 브라우저 기준. 차트 라이브러리 없이 `<canvas>`. 화면 문구�
 
 `app.mjs`(`<script type="module">`)와 테스트가 함께 import한다. 저장소의 나머지 코드는 CommonJS(`.js`), 이 두 파일만 ES 모듈이라 확장자로 구분한다.
 
-- `pickInRect(points, rect)`: 사각형(시각·응답시간 범위) 안의 점.
+- `pickInRect(points, rect)`: 사각형(시각·응답시간 범위) 안의 점, 응답시간 긴 순.
 - `yMax(maxElapsed)`: 세로축 최댓값 단계.
 
 ## 4. 샘플 앱·결제 서비스·부하 발생기
@@ -153,7 +153,7 @@ PC 브라우저 기준. 차트 라이브러리 없이 `<canvas>`. 화면 문구�
 | 경로 | 동작 |
 |---|---|
 | `GET /products` | `products` 전체 조회 — 빠른 정상 요청 |
-| `GET /orders?user=` | `user_id`로 조회(풀스캔) — 느린 SQL |
+| `GET /orders?user=` | 행마다 그 사용자의 주문 수를 다시 세는 비효율 쿼리(상관 하위 쿼리 + `user_id` 인덱스 없음) — 느린 SQL. 사용자 2,000명 |
 | `POST /checkout` | `orders` INSERT 후 `fetch('http://localhost:7702/pay')` — 결제 실패면 502 |
 | `GET /report` | 무거운 계산 반복문 — 앱 자체 처리가 느림 |
 | `GET /boom` | 예외를 던짐 → 500 |
@@ -180,8 +180,9 @@ PC 브라우저 기준. 차트 라이브러리 없이 `<canvas>`. 화면 문구�
   - 동시에 들어온 두 요청의 spans가 섞이지 않는다.
   - 수집 서버가 없어도 앱은 정상 응답한다.
   - 예외를 던지는 처리기는 에러 트랜잭션으로 기록된다.
+- **수집 서버** (`test/collector.test.js`): 수신 후 `/tx/:id`, 잘못된 JSON·1MB 초과는 400, 대시보드 폴더 밖 경로는 404, SSE 첫 메시지에 최근 점.
 - **수집 저장소** (`test/store.test.js`): p95 계산, 수신 후 id 조회, 10분 지난 데이터 정리, 오래된 에이전트의 처리 중 목록 제외.
-- **대시보드 계산** (`test/calc.test.js`): `pickInRect`, `yMax`.
+- **대시보드 계산** (`test/calc.test.mjs`): `pickInRect`, `yMax`.
 - 화면 자체는 `npm run demo`로 눈으로 확인한다.
 
 ## 6. README
