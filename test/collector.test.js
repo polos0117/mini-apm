@@ -75,3 +75,21 @@ test('이상한 입력에도 수집 서버가 죽지 않는다', async (t) => {
   await new Promise((r) => setTimeout(r, 1100)); // 틱 한 번이 지나도
   assert.equal((await fetch(`${base}/tx/x`)).status, 404);
 });
+
+test('수집 서버는 이 PC(127.0.0.1)에서만 접속을 받는다', async (t) => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const { spawn } = require('node:child_process');
+  const lan = Object.values(os.networkInterfaces()).flat().find((i) => i.family === 'IPv4' && !i.internal);
+  if (!lan) return t.skip('외부 네트워크 주소가 없음');
+
+  const port = 7790 + Math.floor(Math.random() * 100);
+  const child = spawn(process.execPath, [path.join(__dirname, '..', 'collector', 'server.js')], {
+    env: { ...process.env, PORT: String(port) },
+  });
+  t.after(() => child.kill());
+  await new Promise((r) => child.stdout.once('data', r));
+
+  assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200);
+  await assert.rejects(fetch(`http://${lan.address}:${port}/`));
+});

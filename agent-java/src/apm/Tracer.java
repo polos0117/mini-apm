@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -24,6 +25,7 @@ public final class Tracer {
   static final int MAX_SPANS = 1000;  // 트랜잭션당 기록할 구간 수. 넘으면 개수만 센다
   static final int MAX_BUFFER = 5000; // 전송 대기 트랜잭션 수
   static final int MAX_SQL = 1000;    // SQL 문장 길이(문자)
+  static final int MAX_PARAM = 200;   // 바인드 값 하나의 길이(문자)
   static final int MAX_BODY = 900_000; // 한 번에 보내는 바이트. 수집 서버 한도(1MB)보다 여유 있게
   static final Set<String> STATIC_EXT = new HashSet<>(Arrays.asList(
       "js", "css", "png", "jpg", "gif", "svg", "ico", "woff", "woff2", "map"));
@@ -40,6 +42,9 @@ public final class Tracer {
   private static final ThreadLocal<int[]> DEPTH = ThreadLocal.withInitial(() -> new int[1]);
   // PreparedStatement는 SQL을 꺼낼 방법이 없어서, prepareStatement 때 문장 객체와 SQL을 묶어 둔다.
   private static final Map<Object, String> SQL = Collections.synchronizedMap(new WeakHashMap<Object, String>());
+  // setXxx(번호, 값)로 넣은 바인드 값. 문장 객체 → (번호 → SQL에 넣을 모양)
+  private static final Map<Object, Map<Integer, String>> PARAMS =
+      Collections.synchronizedMap(new WeakHashMap<Object, Map<Integer, String>>());
 
   public static final class Tx {
     final String id = UUID.randomUUID().toString();
@@ -126,7 +131,14 @@ public final class Tracer {
         tx.dropped++;
         return null;
       }
-      String sql = args.length > 0 && args[0] instanceof String ? (String) args[0] : SQL.get(stmt);
+      String sql;
+      if (args.length > 0 && args[0] instanceof String) {
+        sql = (String) args[0];
+      } else {
+        sql = SQL.get(stmt);
+        Map<Integer, String> params = PARAMS.get(stmt);
+        if (sql != null && params != null) sql = fill(sql, params);
+      }
       Span s = new Span(sql == null ? "?" : normalize(sql), ms(System.nanoTime() - tx.t0));
       tx.spans.add(s);
       return s;
@@ -140,6 +152,54 @@ public final class Tracer {
     if (s == null) return;
     s.elapsed = ms(System.nanoTime() - s.t0);
     if (thrown != null) s.error = thrown.getMessage() != null ? thrown.getMessage() : thrown.getClass().getName();
+  }
+
+  // setXxx(번호, 값) 또는 clearParameters(). 같은 문장 객체는 한 스레드가 쓰므로 안쪽 맵은 잠그지 않는다.
+  public static void bind(Object stmt, String method, Object[] args) {
+    if ("clearParameters".equals(method)) {
+      PARAMS.remove(stmt);
+      return;
+    }
+    Map<Integer, String> params;
+    synchronized (PARAMS) {
+      params = PARAMS.get(stmt);
+      if (params == null) PARAMS.put(stmt, params = new HashMap<>());
+    }
+    params.put((Integer) args[0], literal("setNull".equals(method) ? null : args[1]));
+  }
+
+  // 바인드 값을 SQL에 그대로 넣을 수 있는 모양으로 (log4jdbc 로그와 같은 모양)
+  static String literal(Object v) {
+    if (v == null) return "NULL";
+    if (v instanceof byte[]) return "<byte[" + ((byte[]) v).length + "]>";
+    String s;
+    if (v instanceof Number || v instanceof Boolean) {
+      s = v.toString();
+    } else if (v instanceof CharSequence || v instanceof Character || v instanceof java.util.Date
+        || v instanceof java.time.temporal.Temporal) {
+      s = "'" + v.toString().replace("'", "''") + "'";
+    } else {
+      return "<" + v.getClass().getSimpleName() + ">"; // Blob, 스트림 등
+    }
+    return s.length() > MAX_PARAM ? s.substring(0, MAX_PARAM) + "..." : s;
+  }
+
+  // ?를 번호 순서대로 값으로 바꾼다. 작은따옴표 안의 ?는 문자열의 일부라 그대로 둔다.
+  static String fill(String sql, Map<Integer, String> params) {
+    StringBuilder b = new StringBuilder(sql.length() + 64);
+    boolean quoted = false;
+    int n = 0;
+    for (int i = 0; i < sql.length(); i++) {
+      char c = sql.charAt(i);
+      if (c == '\'') quoted = !quoted;
+      if (c == '?' && !quoted) {
+        String v = params.get(++n);
+        b.append(v != null ? v : "?");
+      } else {
+        b.append(c);
+      }
+    }
+    return b.toString();
   }
 
   static String normalize(String sql) {

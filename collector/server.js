@@ -105,7 +105,8 @@ function createCollector(store = createStore()) {
 
 if (require.main === module) {
   const port = Number(process.env.PORT) || 7700;
-  createCollector().server.listen(port, () => console.log(`수집 서버: http://localhost:${port}`));
+  // 대시보드에 SQL 바인드 값(실제 데이터)이 보이므로 이 PC에서만 접속을 받는다.
+  createCollector().server.listen(port, '127.0.0.1', () => console.log(`수집 서버: http://localhost:${port}`));
 }
 
 module.exports = { createCollector };

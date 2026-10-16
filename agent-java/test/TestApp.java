@@ -5,6 +5,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
@@ -46,6 +47,22 @@ public class TestApp {
               break;
             case "/boom":
               throw new IllegalStateException("boom");
+            case "/bind":
+              try (PreparedStatement p = db.prepareStatement(
+                  "select name from item where id = ? and name <> ? and name <> '?' and name <> ?")) {
+                p.setInt(1, 7);
+                p.setString(2, "it's");
+                p.setNull(3, Types.VARCHAR);
+                p.executeQuery().close();
+                p.clearParameters();
+                p.setInt(1, 8);
+                try {
+                  p.executeQuery().close(); // 2·3번을 안 넣었으니 Derby가 거절한다
+                } catch (SQLException expected) {
+                  // 구간에 에러로 남는지만 본다
+                }
+              }
+              break;
             case "/many": // N+1: 한글이 섞인 긴 SQL 1100번 → 그대로 보내면 수집 서버 1MB 한도를 넘는다
               StringBuilder pad = new StringBuilder();
               for (int i = 0; i < 600; i++) pad.append('가');

@@ -4,6 +4,7 @@ import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
 import static net.bytebuddy.matcher.ElementMatchers.isInterface;
 import static net.bytebuddy.matcher.ElementMatchers.isSubTypeOf;
 import static net.bytebuddy.matcher.ElementMatchers.named;
+import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.namedOneOf;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
@@ -47,7 +48,11 @@ public final class Agent {
         .type(isSubTypeOf(Statement.class).and(not(isInterface())))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(SqlAdvice.class).on(not(isAbstract()).and(namedOneOf(
-                "execute", "executeQuery", "executeUpdate", "executeBatch", "executeLargeUpdate", "executeLargeBatch")))))
+                "execute", "executeQuery", "executeUpdate", "executeBatch", "executeLargeUpdate", "executeLargeBatch"))))
+                // 바인드 값: setXxx(번호, 값[, ...])와 clearParameters(). setFetchSize(int) 같은 인자 하나짜리는 빠진다.
+                .visit(Advice.to(BindAdvice.class).on(not(isAbstract()).and(named("clearParameters")
+                    .or(nameStartsWith("set").and(takesArgument(0, int.class))
+                        .and(takesArguments(2).or(takesArguments(3))))))))
         .type(isSubTypeOf(Connection.class).and(not(isInterface())))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(PrepareAdvice.class).on(not(isAbstract())

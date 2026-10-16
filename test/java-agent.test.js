@@ -73,7 +73,7 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     ]);
     store = createStore();
     collector = createCollector(store);
-    await new Promise((r) => collector.server.listen(0, r));
+    await new Promise((r) => collector.server.listen(0, '127.0.0.1', r)); // 실제 수집 서버처럼 이 PC에서만
     collectorUrl = `http://localhost:${collector.server.address().port}`;
     app = await startApp(collectorUrl);
   });
@@ -150,7 +150,7 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.equal(tx.spans.length, 1);
     const [s] = tx.spans;
     assert.equal(s.type, 'sql');
-    assert.equal(s.text, `select name from item where id = ? and name <> 'q"\\'`);
+    assert.equal(s.text, `select name from item where id = 1 and name <> 'q"\\'`);
     assert.equal(s.error, null);
     assert.ok(s.offset >= 0 && s.elapsed >= 0 && s.offset + s.elapsed <= tx.elapsed + 0.2);
   });
@@ -173,6 +173,17 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.equal(tx.spans.length + tx.droppedSpans, 1100);
     assert.ok(Buffer.byteLength(JSON.stringify(tx)) < 1024 * 1024);
     await waitTx('GET /hello', 4);
+  });
+
+  test('바인드 값이 SQL에 끼워 넣어지고, 따옴표 안의 ?와 clearParameters 뒤의 빈 자리는 그대로다', async () => {
+    assert.equal(await get('/bind'), 200);
+    const tx = await waitTx('GET /bind');
+    assert.deepEqual(tx.spans.map((s) => s.text), [
+      "select name from item where id = 7 and name <> 'it''s' and name <> '?' and name <> NULL",
+      "select name from item where id = 8 and name <> ? and name <> '?' and name <> ?",
+    ]);
+    assert.equal(tx.spans[0].error, null);
+    assert.ok(tx.spans[1].error); // 2·3번 값을 안 넣었으니 Derby가 거절한다
   });
 
   test('요청 밖에서 실행된 SQL(기동 시 create table)은 어디에도 기록되지 않는다', () => {
