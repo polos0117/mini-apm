@@ -144,6 +144,20 @@ test('끝나지 않은 요청은 처리 중 목록에 마지막 호출과 함께
   assert.ok(found.elapsed >= 0);
 });
 
+test('트랜잭션당 span은 1000개까지, 나머지는 개수만 센다', async (t) => {
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  const app = await listen(t, (req, res) => {
+    const stmt = db.prepare('SELECT 1');
+    for (let i = 0; i < 1500; i++) stmt.get();
+    res.end();
+  });
+  await fetch(`${app}/many`);
+  const [tx] = await waitTx('GET /many');
+  assert.equal(tx.spans.length, 1000);
+  assert.equal(tx.droppedSpans, 500);
+});
+
 test('수집 서버가 꺼져 있어도 앱은 정상 응답한다', async (t) => {
   const code = `require('node:http').createServer((q, s) => s.end('ok')).listen(0, function () { console.log(this.address().port); });`;
   const child = spawn(process.execPath, ['--require', path.join(__dirname, '..', 'agent'), '-e', code], {

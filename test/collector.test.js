@@ -57,3 +57,21 @@ test('stream은 연결 즉시 최근 점을, 이후 1초마다 새 점을 보낸
   ac.abort();
   assert.deepEqual(tick.points.map((p) => p.id), ['def']);
 });
+
+test('이상한 입력에도 수집 서버가 죽지 않는다', async (t) => {
+  const base = await start(t);
+  assert.equal((await post(base, JSON.stringify({ agent: 'x', txs: [], active: [null, 1, 'a'] }))).status, 204);
+  assert.equal((await post(base, '{"agent":{"toString":1}}')).status, 204);
+  const raw = await new Promise((resolve) => {
+    const sock = require('node:net').connect(new URL(base).port, 'localhost', () =>
+      sock.write('GET // HTTP/1.1\r\nHost: x\r\n\r\n'),
+    );
+    sock.once('data', (d) => {
+      resolve(String(d));
+      sock.destroy();
+    });
+  });
+  assert.match(raw, /^HTTP\/1.1 400/);
+  await new Promise((r) => setTimeout(r, 1100)); // 틱 한 번이 지나도
+  assert.equal((await fetch(`${base}/tx/x`)).status, 404);
+});

@@ -9,6 +9,7 @@ const COLLECTOR = process.env.APM_COLLECTOR || 'http://localhost:7700';
 const AGENT = process.env.APM_AGENT || 'sample';
 const INTERVAL = Number(process.env.APM_INTERVAL) || 1000;
 const MAX_BUFFER = 5000;
+const MAX_SPANS = 1000; // 트랜잭션당 기록할 호출 수(N+1 루프가 수집 서버 1MB 한도를 넘지 않게). 넘으면 개수만 센다
 
 const als = new AsyncLocalStorage(); // 비동기 흐름을 따라 '지금 어느 트랜잭션인가'를 들고 다닌다
 const open = new Map();              // 처리 중인 트랜잭션
@@ -71,6 +72,10 @@ http.Server.prototype.emit = function (event, req, res) {
 function span(type, text, fn, failOf = () => null) {
   const tx = als.getStore();
   if (!tx || !open.has(tx.id)) return fn();
+  if (tx.spans.length >= MAX_SPANS) {
+    tx.droppedSpans = (tx.droppedSpans ?? 0) + 1;
+    return fn();
+  }
   const s = { type, text: String(text), offset: round(performance.now() - tx.t0), elapsed: 0, error: null };
   tx.spans.push(s);
   const t = performance.now();

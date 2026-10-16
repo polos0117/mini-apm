@@ -6,6 +6,7 @@ const end = (tx) => tx.start + tx.elapsed;
 const isTx = (t) =>
   t !== null && typeof t === 'object' && typeof t.id === 'string' &&
   Number.isFinite(t.start) && Number.isFinite(t.elapsed) && Array.isArray(t.spans);
+const isActive = (a) => a !== null && typeof a === 'object' && Number.isFinite(a.elapsed);
 const toPoint = (tx) => ({ id: tx.id, name: tx.name, t: end(tx), elapsed: tx.elapsed, error: Boolean(tx.error) });
 
 function p95(values) {
@@ -30,7 +31,10 @@ function createStore() {
         byId.set(tx.id, tx);
         added.push(toPoint(tx));
       }
-      agents.set(String(agent), { at: now, active: Array.isArray(active) ? active : [] });
+      agents.set(typeof agent === 'string' ? agent : 'unknown', {
+        at: now,
+        active: Array.isArray(active) ? active.filter(isActive) : [],
+      });
       return added;
     },
     get(id) {

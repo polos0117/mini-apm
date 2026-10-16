@@ -173,6 +173,7 @@ async function showDetail(id) {
     const label = s.error ? `${s.text}  (${s.error})` : s.text;
     table.append(spanRow(s.type === 'sql' ? 'SQL' : '외부', label, s.offset / total, s.elapsed, s.elapsed / total, s.error));
   }
+  if (tx.droppedSpans) table.append(row('td', ['…', `호출 ${tx.droppedSpans}개 생략(트랜잭션당 1000개까지 기록, 생략분 시간은 아래에 포함)`]));
   table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null));
   box.replaceChildren(head, table);
 }

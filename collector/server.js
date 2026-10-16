@@ -67,7 +67,12 @@ function createCollector(store = createStore()) {
   }
 
   const server = http.createServer((req, res) => {
-    const { pathname } = new URL(req.url, 'http://x');
+    let pathname;
+    try {
+      ({ pathname } = new URL(req.url, 'http://x'));
+    } catch {
+      return send(res, 400, 'bad url'); // 예: GET //
+    }
     if (req.method === 'POST' && pathname === '/ingest') return ingest(req, res);
     if (req.method !== 'GET') return send(res, 404, 'not found');
     if (pathname === '/stream') return stream(req, res);
