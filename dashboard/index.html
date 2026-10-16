@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>미니 APM</title>
+<style>
+  :root { --bg: #0f1419; --panel: #182028; --line: #2a3440; --text: #d8dee6; --dim: #8593a3; --ok: #4ea1ff; --err: #ff5c5c; --warn: #ffcc4d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
+  h2 { margin: 0 0 8px; font-size: 13px; color: var(--dim); font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  #tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+  .tile b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
+  #main { display: grid; grid-template-columns: 1fr 340px; gap: 12px; margin-bottom: 12px; }
+  #xview { width: 100%; height: 360px; display: block; cursor: crosshair; touch-action: none; }
+  #active { max-height: 360px; overflow: auto; }
+  section { margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td.text { white-space: normal; word-break: break-all; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.row { cursor: pointer; }
+  tr.row:hover { background: #22303c; }
+  .warn { color: var(--warn); }
+  .err { color: var(--err); }
+  .bar { position: relative; height: 10px; min-width: 240px; background: #0b0f13; }
+  .bar i { position: absolute; top: 0; bottom: 0; background: var(--ok); }
+  .bar i.err { background: var(--err); }
+  #status { font-weight: 400; }
+</style>
+</head>
+<body>
+  <div id="tiles">
+    <div class="panel tile"><h2>초당 처리량(TPS)</h2><b id="tps">-</b></div>
+    <div class="panel tile"><h2>평균 응답(ms)</h2><b id="avg">-</b></div>
+    <div class="panel tile"><h2>응답 95%(p95, ms)</h2><b id="p95">-</b></div>
+    <div class="panel tile"><h2>에러</h2><b id="errors">-</b></div>
+  </div>
+  <div id="main">
+    <div class="panel"><h2>X-View — 영역을 끌어서 고르세요 <span id="status"></span></h2><canvas id="xview"></canvas></div>
+    <div class="panel"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
+  </div>
+  <section class="panel"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
+  <section class="panel"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>
