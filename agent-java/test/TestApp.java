@@ -46,6 +46,17 @@ public class TestApp {
               break;
             case "/boom":
               throw new IllegalStateException("boom");
+            case "/many": // N+1: 한글이 섞인 긴 SQL 1100번 → 그대로 보내면 수집 서버 1MB 한도를 넘는다
+              StringBuilder pad = new StringBuilder();
+              for (int i = 0; i < 600; i++) pad.append('가');
+              try (PreparedStatement p = db.prepareStatement(
+                  "select name from item where id = ? and name <> '" + pad + "'")) {
+                for (int i = 0; i < 1100; i++) {
+                  p.setInt(1, i);
+                  p.executeQuery().close();
+                }
+              }
+              break;
             case "/slow":
               Thread.sleep(1500);
               break;

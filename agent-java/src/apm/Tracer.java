@@ -23,7 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class Tracer {
   static final int MAX_SPANS = 1000;  // 트랜잭션당 기록할 구간 수. 넘으면 개수만 센다
   static final int MAX_BUFFER = 5000; // 전송 대기 트랜잭션 수
-  static final int MAX_SQL = 1000;    // SQL 문장 길이. 큰 SQL 1000개가 수집 서버 1MB 한도를 넘지 않게
+  static final int MAX_SQL = 1000;    // SQL 문장 길이(문자)
+  static final int MAX_BODY = 900_000; // 한 번에 보내는 바이트. 수집 서버 한도(1MB)보다 여유 있게
   static final Set<String> STATIC_EXT = new HashSet<>(Arrays.asList(
       "js", "css", "png", "jpg", "gif", "svg", "ico", "woff", "woff2", "map"));
 
@@ -161,13 +162,38 @@ public final class Tracer {
     t.start();
   }
 
+  // 수집 서버는 1MB가 넘는 본문을 통째로 거절한다. 그래서 MAX_BODY 단위로 나눠 보내고,
+  // 혼자서도 넘는 트랜잭션은 뒤쪽 구간을 잘라 droppedSpans로 센다.
   static void flush() {
     List<Tx> batch;
     synchronized (Tracer.class) {
       batch = done;
       done = new ArrayList<>();
     }
-    byte[] body = payload(batch, OPEN.values(), System.nanoTime()).getBytes(StandardCharsets.UTF_8);
+    String active = active(OPEN.values(), System.nanoTime());
+    int room = MAX_BODY - utf8(active) - utf8(agent) - 64;
+    StringBuilder txs = new StringBuilder();
+    int bytes = 0;
+    for (Tx t : batch) {
+      String json = tx(t, room);
+      int n = utf8(json) + 1;
+      if (bytes > 0 && bytes + n > room) {
+        post(txs, active);
+        txs.setLength(0);
+        bytes = 0;
+      }
+      if (bytes > 0) txs.append(',');
+      txs.append(json);
+      bytes += n;
+    }
+    post(txs, active); // 트랜잭션이 없어도 처리 중 목록은 보낸다
+  }
+
+  static void post(CharSequence txs, String active) {
+    StringBuilder b = new StringBuilder(txs.length() + active.length() + 64).append("{\"agent\":");
+    str(b, agent);
+    b.append(",\"txs\":[").append(txs).append("],\"active\":").append(active).append('}');
+    byte[] body = b.toString().getBytes(StandardCharsets.UTF_8);
     try {
       HttpURLConnection c = (HttpURLConnection) new URL(collector + "/ingest").openConnection();
       c.setConnectTimeout(1000);
@@ -188,17 +214,14 @@ public final class Tracer {
     }
   }
 
+  static int utf8(String s) {
+    return s.getBytes(StandardCharsets.UTF_8).length;
+  }
+
   // ---- JSON: 앱의 Jackson 버전과 부딪히지 않게 직접 쓴다 ----
 
-  static String payload(List<Tx> txs, Collection<Tx> open, long now) {
-    StringBuilder b = new StringBuilder(1024).append("{\"agent\":");
-    str(b, agent);
-    b.append(",\"txs\":[");
-    for (int i = 0; i < txs.size(); i++) {
-      if (i > 0) b.append(',');
-      tx(b, txs.get(i));
-    }
-    b.append("],\"active\":[");
+  static String active(Collection<Tx> open, long now) {
+    StringBuilder b = new StringBuilder(256).append('[');
     boolean first = true;
     for (Tx t : open) {
       if (!first) b.append(',');
@@ -217,11 +240,35 @@ public final class Tracer {
       str(b, last);
       b.append('}');
     }
-    return b.append("]}").toString();
+    return b.append(']').toString();
   }
 
-  static void tx(StringBuilder b, Tx t) {
-    b.append("{\"id\":");
+  // 구간은 budget 바이트 안에 드는 데까지만 담고 나머지는 droppedSpans에 더한다.
+  static String tx(Tx t, int budget) {
+    StringBuilder spans = new StringBuilder();
+    int left = budget - utf8(t.name) - 300; // 300: 구간 밖 필드 몫
+    int kept = 0;
+    int dropped;
+    synchronized (t.spans) {
+      for (Span s : t.spans) {
+        StringBuilder one = new StringBuilder(s.text.length() + 80).append("{\"type\":\"sql\",\"text\":");
+        str(one, s.text);
+        one.append(",\"offset\":");
+        num(one, s.offset);
+        one.append(",\"elapsed\":");
+        num(one, s.elapsed);
+        one.append(",\"error\":");
+        str(one, s.error);
+        one.append('}');
+        String json = one.toString();
+        left -= utf8(json) + 1;
+        if (left < 0) break;
+        if (kept++ > 0) spans.append(',');
+        spans.append(json);
+      }
+      dropped = t.dropped + t.spans.size() - kept;
+    }
+    StringBuilder b = new StringBuilder(spans.length() + 256).append("{\"id\":");
     str(b, t.id);
     b.append(",\"name\":");
     str(b, t.name);
@@ -229,24 +276,8 @@ public final class Tracer {
     num(b, t.elapsed);
     b.append(",\"status\":").append(t.status).append(",\"error\":");
     str(b, t.error);
-    if (t.dropped > 0) b.append(",\"droppedSpans\":").append(t.dropped);
-    b.append(",\"spans\":[");
-    synchronized (t.spans) {
-      for (int i = 0; i < t.spans.size(); i++) {
-        Span s = t.spans.get(i);
-        if (i > 0) b.append(',');
-        b.append("{\"type\":\"sql\",\"text\":");
-        str(b, s.text);
-        b.append(",\"offset\":");
-        num(b, s.offset);
-        b.append(",\"elapsed\":");
-        num(b, s.elapsed);
-        b.append(",\"error\":");
-        str(b, s.error);
-        b.append('}');
-      }
-    }
-    b.append("]}");
+    if (dropped > 0) b.append(",\"droppedSpans\":").append(dropped);
+    return b.append(",\"spans\":[").append(spans).append("]}").toString();
   }
 
   static void str(StringBuilder b, String s) {

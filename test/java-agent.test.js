@@ -165,6 +165,16 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.equal(tx.error, tx.spans[0].error);
   });
 
+  test('구간이 많아 1MB를 넘는 트랜잭션도 잘려서 저장되고, 같은 때 끝난 요청도 잃지 않는다', async () => {
+    const [many, hello] = await Promise.all([get('/many'), get('/hello')]);
+    assert.deepEqual([many, hello], [200, 200]);
+    const tx = await waitTx('GET /many');
+    assert.ok(tx.spans.length > 0 && tx.spans.length < 1000, String(tx.spans.length));
+    assert.equal(tx.spans.length + tx.droppedSpans, 1100);
+    assert.ok(Buffer.byteLength(JSON.stringify(tx)) < 1024 * 1024);
+    await waitTx('GET /hello', 4);
+  });
+
   test('요청 밖에서 실행된 SQL(기동 시 create table)은 어디에도 기록되지 않는다', () => {
     for (const p of store.points(0)) {
       for (const s of store.get(p.id).spans) assert.doesNotMatch(s.text, /create table|insert into/);
