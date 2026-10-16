@@ -82,7 +82,64 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     collector?.close();
   });
 
+  const get = (p) => fetch(`http://localhost:${app.port}${p}`).then((r) => r.status);
+  const stored = (name) => store.points(0).filter((p) => p.name === name);
+  // 이름이 name인 트랜잭션이 count개 저장될 때까지 기다렸다가 count번째의 상세를 돌려준다.
+  async function waitTx(name, count = 1) {
+    const pts = await waitFor(() => stored(name).length >= count && stored(name), `${name} 트랜잭션`, 10000);
+    return store.get(pts[count - 1].id);
+  }
+
   test('기동하면 에이전트 안내 한 줄이 출력된다', () => {
     assert.ok(app.stdout.includes(`[apm] mini-apm agent → ${collectorUrl} (test)`), app.stdout);
+  });
+
+  test('요청 하나가 트랜잭션 하나로 저장된다', async () => {
+    assert.equal(await get('/hello'), 200);
+    const tx = await waitTx('GET /hello');
+    assert.equal(tx.status, 200);
+    assert.equal(tx.error, null);
+    assert.ok(tx.elapsed >= 0 && tx.start > 0);
+    assert.deepEqual(tx.spans, []);
+  });
+
+  test('경로 파라미터(;jsessionid)는 이름에서 빠진다', async () => {
+    assert.equal(await get('/hello;jsessionid=abc'), 200);
+    await waitTx('GET /hello', 2);
+    assert.equal(store.points(0).filter((p) => p.name.includes('jsessionid')).length, 0);
+  });
+
+  test('SQL 없이 예외로 끝난 요청은 500, 에러는 HTTP 500', async () => {
+    assert.equal(await get('/boom'), 500);
+    const tx = await waitTx('GET /boom');
+    assert.equal(tx.status, 500);
+    assert.equal(tx.error, 'HTTP 500');
+  });
+
+  test('정적 파일 요청은 기록하지 않는다', async () => {
+    assert.equal(await get('/app.js'), 200);
+    assert.equal(await get('/hello'), 200);
+    await waitTx('GET /hello', 3); // 뒤 요청이 저장됐으면 앞 요청도 이미 전송됐다
+    assert.equal(stored('GET /app.js').length, 0);
+  });
+
+  test('처리 중인 요청이 수집 서버의 처리 중 목록에 보인다', async () => {
+    const res = get('/slow');
+    const item = await waitFor(() => store.active().find((a) => a.name === 'GET /slow'), '처리 중 목록', 5000);
+    assert.equal(typeof item.id, 'string');
+    assert.equal(item.lastSpan, null);
+    assert.equal(await res, 200);
+    const tx = await waitTx('GET /slow');
+    assert.ok(tx.elapsed >= 1400, String(tx.elapsed));
+  });
+
+  test('수집 서버가 꺼져 있어도 앱은 정상 응답하고 실패 메시지는 한 번만 나온다', async (t) => {
+    const dead = await startApp(`http://localhost:${await freePort()}`);
+    t.after(() => dead.proc.kill());
+    const res = await fetch(`http://localhost:${dead.port}/hello`);
+    assert.equal(res.status, 200);
+    await sleep(1200); // 200ms 간격이면 대여섯 번 전송을 시도한다
+    const lines = dead.stderr.split('\n').filter((l) => l.includes('[apm] 전송 실패'));
+    assert.equal(lines.length, 1, dead.stderr);
   });
 });
