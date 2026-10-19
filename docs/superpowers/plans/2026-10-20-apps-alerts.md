@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 대시보드에서 앱(에이전트)을 골라 보고, 최근 에러를 모아 보며, 에러 요청·앱 끊김을 화면과 Windows 알림으로 알린다.
+**Goal:** 대시보드에서 앱(에이전트)을 골라 보고, 최근 에러를 모아 보며, 에러 요청·앱 끊김을 화면과 Windows 알림으로 알린다. Java 에이전트가 긴 SQL을 1,000자에서 자르지 않게 한다.
 
 **Architecture:** 수집 서버(`collector/store.js`, `server.js`)는 트랜잭션·점·처리 중 항목에 `agent`를 붙이고 앱별 통계와 앱 목록(`agents`)을 스트림에 더한다.
 대시보드는 받은 것을 화면에서 거르고, 경보 판단은 브라우저 API 없는 `dashboard/alerts.mjs`가 한다.
@@ -783,4 +783,75 @@ Expected: 실패 0 (기존 37 + 새 store 4 + alerts 8 + calc 1 = 50).
 ```bash
 git add dashboard/calc.mjs dashboard/index.html dashboard/app.mjs README.md test/calc.test.mjs test/dashboard.test.js
 git commit -m "feat(dashboard): per-app buttons, recent errors panel, alert bar and notifications"
+```
+
+---
+
+### Task 4: 긴 SQL을 자르지 않기(Java 에이전트)
+
+**Files:**
+- Modify: `agent-java/src/apm/Tracer.java:27` (`MAX_SQL`)
+- Modify: `agent-java/test/TestApp.java` (`/long` 추가)
+- Modify: `README.md`
+- Test: `test/java-agent.test.js`
+
+**Interfaces:** 없음(구간 `text` 모양은 그대로, 길이 한도만 바뀐다).
+
+- [ ] **Step 1: 실패하는 테스트 쓰기**
+
+`agent-java/test/TestApp.java`의 `case "/many":` 앞에 추가:
+
+```java
+            case "/long": // MyBatis 동적 SQL처럼 긴 문장(5,000자 넘음)도 잘리지 않아야 한다
+              StringBuilder in = new StringBuilder("select name from item where id in (0");
+              for (int i = 1; i <= 1200; i++) in.append(", ").append(i);
+              try (Statement s = db.createStatement()) {
+                s.executeQuery(in.append(") and name <> 'end'").toString()).close();
+              }
+              break;
+```
+
+`test/java-agent.test.js`의 '바인드 값이 SQL에 끼워 넣어지고…' 테스트 바로 뒤에 추가:
+
+```js
+  test('긴 SQL도 자르지 않고 보낸다', async () => {
+    assert.equal(await get('/long'), 200);
+    const tx = await waitTx('GET /long');
+    const sql = tx.spans[0].text;
+    assert.ok(sql.length > 5000, String(sql.length));
+    assert.match(sql, /, 1200\) and name <> 'end'$/);
+  });
+```
+
+- [ ] **Step 2: 실패 확인**
+
+Run: `fnm exec --using=22 node --test test/java-agent.test.js`
+Expected: '긴 SQL도 자르지 않고 보낸다'만 FAIL — 길이 `1000`. (테스트가 jar를 다시 빌드한다.)
+
+- [ ] **Step 3: 구현** — `agent-java/src/apm/Tracer.java`
+
+```java
+  static final int MAX_SQL = 100_000; // SQL 문장·URL 길이(문자). 한글이라도 약 300KB라 MAX_BODY 안에 든다
+```
+
+- [ ] **Step 4: 통과 확인**
+
+Run: `fnm exec --using=22 node --test test/java-agent.test.js`
+Expected: PASS, 실패 0.
+
+- [ ] **Step 5: README**
+
+Java 절의 "SQL 구간에는 바인드 값이 끼워 넣어진 문장이 보인다(…)." 문장 뒤에 이어서:
+` 문장은 10만 자까지 그대로 보이고, 바인드 값 하나는 200자에서 잘라 \`...\`을 붙인다.`
+
+- [ ] **Step 6: 전체 테스트**
+
+Run: `fnm exec --using=22 npm.cmd test`
+Expected: 실패 0 (Task 3까지 50 + 1 = 51).
+
+- [ ] **Step 7: 커밋**
+
+```bash
+git add agent-java/src/apm/Tracer.java agent-java/test/TestApp.java test/java-agent.test.js README.md
+git commit -m "feat(agent-java): keep long SQL up to 100k chars instead of cutting at 1000"
 ```

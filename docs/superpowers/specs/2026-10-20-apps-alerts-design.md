@@ -91,6 +91,15 @@ opts = { errors: boolean, down: boolean, downMs: number }
     `Notification`이 없는 브라우저에서는 숨긴다.
 - 화면에 넣는 글자는 모두 `textContent`(기존 테스트 규칙).
 
+## 3. 긴 SQL을 자르지 않기(Java 에이전트)
+
+- 지금은 `Tracer.MAX_SQL = 1000`에서 SQL 문장(과 외부 호출 URL)을 잘라, MyBatis 동적 SQL처럼 긴 문장의 뒷부분이 보이지 않는다.
+- `MAX_SQL`을 `100_000`자로 올린다. 한 문장이 한글이라도 약 300KB라 전송 한도(`MAX_BODY` 900KB) 안이다.
+  트랜잭션 하나가 한도를 넘으면 지금처럼 뒤쪽 구간을 잘라 `droppedSpans`로 센다(바꾸지 않음).
+- 바인드 값 하나의 길이 한도(`MAX_PARAM` 200자, 넘으면 `...`)는 그대로 둔다. 긴 본문 값까지 다 실으면 메모리와 화면만 커진다.
+- 대시보드 트랜잭션 상세는 이미 줄을 바꿔 전체를 보여 준다. 처리 중 목록의 마지막 호출 줄은 지금처럼 한 줄로 자르고 툴팁에 전체.
+- Node 에이전트는 원래 자르지 않는다.
+
 ## 테스트
 
 - `test/store.test.js`
@@ -107,6 +116,7 @@ opts = { errors: boolean, down: boolean, downMs: number }
   - 기준선에서 이미 끊긴 앱은 조용하고, 돌아오면 다시 연결됨
   - `errors:false`/`down:false`면 해당 경보 없음
   - `reset()` 뒤 첫 메시지는 다시 기준선
+- `test/java-agent.test.js`: 5,000자가 넘는 SQL이 끝까지 구간 `text`에 있다.
 - 화면: Playwright 스크린샷으로 확인. 데모 샘플 앱을 `APM_AGENT`가 다른 두 개로 띄워 버튼, 모양 구분, 거르기,
   최근 에러, 빨간 줄을 본다. 하나를 끊어 끊김 경보를 본다. Windows 알림 자체는 사람이 확인한다.
 
