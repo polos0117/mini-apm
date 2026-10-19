@@ -17,6 +17,8 @@ const repoJar = (group, id, v) => path.join(REPO, ...group.split('.'), id, v, `$
 const APP_CP = [
   repoJar('org.apache.tomcat.embed', 'tomcat-embed-core', '9.0.43'),
   repoJar('jakarta.annotation', 'jakarta.annotation-api', '1.3.5'), // 로컬 저장소에 tomcat-annotations-api는 pom뿐이다
+  repoJar('com.squareup.okhttp3', 'okhttp', '3.14.9'),
+  repoJar('com.squareup.okio', 'okio', '1.17.2'),
   path.join(JAVA_HOME, 'db', 'lib', 'derby.jar'),
 ];
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-java-'));
@@ -214,6 +216,17 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.match(dead.text, /^GET https:\/\/127\.0\.0\.1:\d+\/$/);
     assert.match(dead.error, /Connection refused|timed out/); // Windows는 닫힌 포트에 2초쯤 재시도한 뒤 거절한다
     assert.ok(ok.offset >= 0 && ok.elapsed >= 0);
+  });
+
+  test('OkHttp 동기 호출이 외부 구간으로 기록된다', async () => {
+    assert.equal(await get('/okhttp'), 200);
+    const tx = await waitTx('GET /okhttp');
+    assert.equal(tx.spans.length, 3);
+    const [ok, err, dead] = tx.spans;
+    assert.deepEqual([ok.type, ok.text, ok.error], ['http', `GET ${stubUrl}/ok`, null]);
+    assert.deepEqual([err.text, err.error], [`GET ${stubUrl}/err`, 'HTTP 500']); // 예외 없이 500 응답
+    assert.match(dead.text, /^GET http:\/\/127\.0\.0\.1:\d+\/$/);
+    assert.match(dead.error, /127\.0\.0\.1/); // Failed to connect to /127.0.0.1:<port>
   });
 
   test('요청 밖에서 실행된 SQL(기동 시 create table)은 어디에도 기록되지 않는다', () => {

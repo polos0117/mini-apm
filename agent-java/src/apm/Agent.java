@@ -38,7 +38,8 @@ public final class Agent {
       @Override
       public void onError(String type, ClassLoader loader, JavaModule module, boolean loaded, Throwable t) {
         // ponytail: 대상인지 이름으로만 거른다. 하위 타입 판정 중 무관한 클래스에서 나는 오류는 숨긴다.
-        if (type.endsWith("StandardHostValve") || type.contains("Statement") || type.contains("Connection")) {
+        if (type.endsWith("StandardHostValve") || type.contains("Statement") || type.contains("Connection")
+            || type.endsWith("RealCall")) {
           System.err.println("[apm] 계측 실패: " + type + " " + t);
         }
       }
@@ -62,6 +63,10 @@ public final class Agent {
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(PrepareAdvice.class).on(not(isAbstract())
                 .and(namedOneOf("prepareStatement", "prepareCall")).and(takesArgument(0, String.class)))))
+        // OkHttp 동기 호출. 3.x는 okhttp3.RealCall, 4.x는 okhttp3.internal.connection.RealCall(4.x는 테스트하지 않음)
+        .type(namedOneOf("okhttp3.RealCall", "okhttp3.internal.connection.RealCall"))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(OkHttpAdvice.class).on(named("execute").and(takesArguments(0)))))
         .installOn(inst);
 
     // JDK의 HttpURLConnection은 부트스트랩 로더가 올린다. 기본 무시 규칙(부트스트랩 제외)을 풀고 이름이 같은 이 클래스 하나만,

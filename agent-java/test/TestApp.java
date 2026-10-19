@@ -10,6 +10,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import javax.servlet.ServletException;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -83,6 +86,16 @@ public class TestApp {
               call(stub + "/err", false); // 본문 먼저 → 500 예외 → 코드 확인
               call(stub + "/nf", true);   // 404
               call("https://127.0.0.1:" + deadPort() + "/", false); // 연결 실패, https 위임 객체
+              break;
+            case "/okhttp":
+              OkHttpClient ok = new OkHttpClient();
+              for (String u : new String[] {stub + "/ok", stub + "/err", "http://127.0.0.1:" + deadPort() + "/"}) {
+                try (Response r = ok.newCall(new Request.Builder().url(u).build()).execute()) {
+                  r.code();
+                } catch (IOException expected) {
+                  // 연결 실패
+                }
+              }
               break;
             case "/slow":
               Thread.sleep(1500);

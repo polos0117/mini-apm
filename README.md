@@ -55,15 +55,16 @@ Git Bash에서는 `fnm exec --using=22 node demo.js`, `fnm exec --using=22 npm.c
 - 대상은 Java 8 이상의 내장 Tomcat 앱(Spring Boot 2.x)이다.
 
 ```powershell
-npm run build:java        # agent-java/dist/mini-apm-agent.jar
+npm run build:java        # agent-java/dist/mini-apm-agent.jar + mini-apm-boot.jar (같은 폴더에 둔다)
 node collector/server.js  # 수집 서버만 따로 띄울 때
 ```
 
 Eclipse 실행 설정(Run Configurations → 해당 Application)에 두 가지를 넣는다.
 - **Arguments → VM arguments**: `-javaagent:C:/Users/jjshs/mini-apm/agent-java/dist/mini-apm-agent.jar`
-- **Environment**: `APM_AGENT=ipfinance` (대시보드에 표시될 이름)
+- **Environment**: `APM_AGENT=ipfinance` (보내는 쪽 이름. 대시보드에는 아직 표시하지 않는다)
+- **Environment(선택)**: `APM_APP_PACKAGE=org.kipa.ipfinance.` — 처리 중 목록의 "현재 위치"에서 앱 메서드를 고를 때 쓰는 클래스 이름 접두어. 없으면 main 클래스의 패키지를 쓰고, WTP 외부 Tomcat처럼 main이 Tomcat이면 맨 위 프레임만 보인다.
 
-앱 콘솔에 `[apm] mini-apm agent → ...` 한 줄이 보이면 붙은 것이다.
+앱 콘솔에 `[apm] mini-apm agent → ... (ipfinance, 앱 패키지 org.kipa.ipfinance.)` 한 줄이 보이면 붙은 것이다.
 
 SQL 구간에는 바인드 값이 끼워 넣어진 문장이 보인다(예: `where id = 7 and name = '홍길동'`). **DB의 실제 데이터가 대시보드에 그대로 보이므로**, 수집 서버는 이 PC(`127.0.0.1`)에서만 접속을 받는다.
 
@@ -75,10 +76,12 @@ SQL 구간에는 바인드 값이 끼워 넣어진 문장이 보인다(예: `whe
 | `RequestAdvice` → `StandardHostValve.invoke` | 서블릿 트랜잭션 계측 | 어느 지점을 감싸야 필터 시간까지 잡히는가 |
 | `SqlAdvice` + 깊이 카운터 | JDBC 계측 | 커넥션 풀·로깅 프록시가 겹쳐도 SQL 하나를 한 번만 세는 법 |
 | `PrepareAdvice` | SQL 문장 수집 | `PreparedStatement`에서 SQL을 얻으려면 만들 때 잡아야 한다 |
+| `HttpAdvice` + `Boot-Class-Path` | 외부 호출 계측 | JDK 클래스에 넣은 계측 코드가 에이전트 클래스를 보려면 부트스트랩 로더에 올려야 한다 |
+| 처리 중 목록의 현재 위치 | 액티브 서비스 스택 | 끝나지 않은 요청이 어디서 멈췄는지는 그 스레드의 스택으로 본다 |
 
 ### Java 에이전트의 한계
 - **비동기 컨트롤러**: `DeferredResult`나 `CompletableFuture`를 반환하는 컨트롤러는 처리 스레드가 바뀐다. 그러면 SQL 구간을 놓친다. 트랜잭션은 스레드에 붙어 있기 때문이다.
-- **외부 호출**: `HttpURLConnection`, OkHttp는 계측하지 않는다. 그 시간은 "앱 자체 처리"에 섞인다.
+- **외부 호출**: `HttpURLConnection`(`RestTemplate` 기본 포함)과 OkHttp 동기 호출만 기록한다. OkHttp `enqueue`, Apache HttpClient, WebClient는 "앱 자체 처리"에 섞인다. `HttpURLConnection`은 응답 헤더를 받을 때까지만 재고, 본문을 읽는 시간은 빠진다.
 - **정적 파일 판단**: 확장자(`js css png jpg gif svg ico woff woff2 map`)로만 판단한다.
 - **요청 밖의 SQL**: Quartz 배치처럼 요청 밖에서 도는 SQL은 기록하지 않는다.
 - **배치 실행의 바인드 값**: `addBatch`를 여러 번 한 뒤 `executeBatch`하면 마지막 행의 값만 보인다.

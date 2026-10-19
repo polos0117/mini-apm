@@ -10,7 +10,10 @@ const BYTEBUDDY = process.env.APM_BYTEBUDDY_JAR ||
 // RequestAdvice가 쓰는 javax.servlet 타입 때문에 컴파일 때만 쓴다. jar에는 넣지 않는다.
 const SERVLET = path.join(REPO, 'org/apache/tomcat/embed/tomcat-embed-core/9.0.43/tomcat-embed-core-9.0.43.jar');
 
-const SRC = path.join(__dirname, 'src', 'apm');
+// OkHttpAdvice가 쓰는 OkHttp 타입 때문에 컴파일 때만 쓴다.
+const OKHTTP = path.join(REPO, 'com/squareup/okhttp3/okhttp/3.14.9/okhttp-3.14.9.jar');
+
+const SRC =path.join(__dirname, 'src', 'apm');
 const BUILD = path.join(__dirname, 'build');
 const CLASSES = path.join(BUILD, 'classes');
 const JAR = path.join(__dirname, 'dist', 'mini-apm-agent.jar');
@@ -20,7 +23,7 @@ const javaBin = (name) => path.join(JAVA_HOME, 'bin', process.platform === 'win3
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: ['ignore', 'inherit', 'inherit'] });
 
 function build() {
-  for (const [what, p] of [['JDK (APM_JAVA_HOME)', javaBin('javac')], ['Byte Buddy (APM_BYTEBUDDY_JAR)', BYTEBUDDY], ['tomcat-embed-core', SERVLET]]) {
+  for (const [what, p] of [['JDK (APM_JAVA_HOME)', javaBin('javac')], ['Byte Buddy (APM_BYTEBUDDY_JAR)', BYTEBUDDY], ['tomcat-embed-core', SERVLET], ['okhttp', OKHTTP]]) {
     if (!fs.existsSync(p)) throw new Error(`${what} 없음: ${p}`);
   }
   fs.rmSync(CLASSES, { recursive: true, force: true });
@@ -29,7 +32,7 @@ function build() {
 
   const sources = fs.readdirSync(SRC).filter((f) => f.endsWith('.java')).map((f) => path.join(SRC, f));
   run(javaBin('javac'), ['-source', '8', '-target', '8', '-encoding', 'UTF-8', '-nowarn',
-    '-cp', [BYTEBUDDY, SERVLET].join(path.delimiter), '-d', CLASSES, ...sources]);
+    '-cp', [BYTEBUDDY, SERVLET, OKHTTP].join(path.delimiter), '-d', CLASSES, ...sources]);
   // Tracer는 부트스트랩 로더에 올린다(JDK의 HttpURLConnection 안에 들어간 계측 코드가 부르므로). 에이전트 jar에서는 뺀다.
   const apm = path.join(CLASSES, 'apm');
   const tracer = fs.readdirSync(apm).filter((f) => /^Tracer(\$.*)?\.class$/.test(f));
