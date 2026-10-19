@@ -130,13 +130,23 @@ function showStats(s) {
 function showActive(list) {
   if (list.length === 0) return $('active').replaceChildren('없음');
   const table = document.createElement('table');
+  // 좁은 패널이라 이름·시간 한 줄, 마지막 호출은 그 아래 한 줄. 넘치면 …로 자르고 전체는 툴팁으로.
   for (const a of list) {
-    const tr = row('td', [a.name, `${(a.elapsed / 1000).toFixed(1)}초`, a.lastSpan ?? '']);
-    if (a.elapsed >= 3000) tr.className = 'err';
-    else if (a.elapsed >= 1000) tr.className = 'warn';
+    const level = a.elapsed >= 3000 ? 'err' : a.elapsed >= 1000 ? 'warn' : '';
+    const tr = row('td', [a.name, `${(a.elapsed / 1000).toFixed(1)}초`]);
+    tr.className = level;
+    tr.children[0].className = 'ell';
+    tr.children[0].title = a.name;
     tr.children[1].className = 'num';
-    tr.children[2].className = 'text';
     table.append(tr);
+    if (a.lastSpan) {
+      const sub = row('td', [a.lastSpan]);
+      sub.className = `sub ${level}`;
+      sub.firstChild.colSpan = 2;
+      sub.firstChild.className = 'ell';
+      sub.firstChild.title = a.lastSpan;
+      table.append(sub);
+    }
   }
   $('active').replaceChildren(table);
 }

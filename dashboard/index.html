@@ -15,6 +15,11 @@
   #main { display: grid; grid-template-columns: 1fr 340px; gap: 12px; margin-bottom: 12px; }
   #xview { width: 100%; height: 360px; display: block; cursor: crosshair; touch-action: none; }
   #active { max-height: 360px; overflow: auto; }
+  #active table { table-layout: fixed; }
+  #active td.num { width: 64px; }
+  #active tr:has(+ tr.sub) td { border-bottom: 0; }
+  #active tr.sub td { padding-top: 0; font-size: 12px; opacity: 0.75; }
+  td.ell { overflow: hidden; text-overflow: ellipsis; }
   section { margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
