@@ -86,6 +86,8 @@ public class TestApp {
               call(stub + "/err", false); // 본문 먼저 → 500 예외 → 코드 확인
               call(stub + "/nf", true);   // 404
               call("https://127.0.0.1:" + deadPort() + "/", false); // 연결 실패, https 위임 객체
+              post(stub + "/ok");                                  // RestTemplate처럼 getOutputStream에서 연결
+              connectOnly("http://127.0.0.1:" + deadPort() + "/"); // connect()에서 연결 실패
               break;
             case "/okhttp":
               OkHttpClient ok = new OkHttpClient();
@@ -129,6 +131,34 @@ public class TestApp {
       } catch (IOException ignored) {
         // 연결 실패
       }
+    }
+  }
+
+  // RestTemplate(SimpleBufferingClientHttpRequest)와 같은 순서: 고정 길이 → getOutputStream으로 연결·본문 → 응답 코드
+  static void post(String url) {
+    try {
+      HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+      byte[] body = "x".getBytes("UTF-8");
+      c.setRequestMethod("POST");
+      c.setDoOutput(true);
+      c.setFixedLengthStreamingMode(body.length);
+      try (java.io.OutputStream out = c.getOutputStream()) {
+        out.write(body);
+      }
+      c.getResponseCode();
+    } catch (IOException ignored) {
+      // 테스트가 구간으로 확인한다
+    }
+  }
+
+  static void connectOnly(String url) {
+    try {
+      HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+      c.setConnectTimeout(2000);
+      c.connect();
+      c.getResponseCode();
+    } catch (IOException expected) {
+      // 연결 실패
     }
   }
 

@@ -81,7 +81,7 @@ SQL 구간에는 바인드 값이 끼워 넣어진 문장이 보인다(예: `whe
 
 ### Java 에이전트의 한계
 - **비동기 컨트롤러**: `DeferredResult`나 `CompletableFuture`를 반환하는 컨트롤러는 처리 스레드가 바뀐다. 그러면 SQL 구간을 놓친다. 트랜잭션은 스레드에 붙어 있기 때문이다.
-- **외부 호출**: `HttpURLConnection`(`RestTemplate` 기본 포함)과 OkHttp 동기 호출만 기록한다. OkHttp `enqueue`, Apache HttpClient, WebClient는 "앱 자체 처리"에 섞인다. `HttpURLConnection`은 응답 헤더를 받을 때까지만 재고, 본문을 읽는 시간은 빠진다.
+- **외부 호출**: `HttpURLConnection`(`RestTemplate` 기본 포함)과 OkHttp 동기 호출만 기록한다. OkHttp `enqueue`, Apache HttpClient, WebClient는 "앱 자체 처리"에 섞인다. `HttpURLConnection`은 연결부터 응답 헤더를 받을 때까지만 재고, 응답 본문을 읽는 시간은 빠진다. Java 17 이상에서는 Byte Buddy 1.10.20이 JDK 클래스를 못 읽어 `HttpURLConnection`이 기록되지 않는다(기동 시 `[apm] 계측 실패`).
 - **정적 파일 판단**: 확장자(`js css png jpg gif svg ico woff woff2 map`)로만 판단한다.
 - **요청 밖의 SQL**: Quartz 배치처럼 요청 밖에서 도는 SQL은 기록하지 않는다.
 - **배치 실행의 바인드 값**: `addBatch`를 여러 번 한 뒤 `executeBatch`하면 마지막 행의 값만 보인다.

@@ -79,7 +79,8 @@ public final class Agent {
         .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
         .type(named("sun.net.www.protocol.http.HttpURLConnection"))
         .transform((builder, type, loader, module) ->
-            builder.visit(Advice.to(HttpAdvice.class).on(named("getInputStream").and(takesArguments(0)))))
+            builder.visit(Advice.to(HttpAdvice.class).on(named("getInputStream").and(takesArguments(0))))
+                .visit(Advice.to(ConnectAdvice.class).on(namedOneOf("connect", "getOutputStream").and(takesArguments(0)))))
         .installOn(inst);
 
     Tracer.startSender(interval);

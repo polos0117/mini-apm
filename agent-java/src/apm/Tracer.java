@@ -47,6 +47,9 @@ public final class Tracer {
   // setXxx(번호, 값)로 넣은 바인드 값. 문장 객체 → (번호 → SQL에 넣을 모양)
   private static final Map<Object, Map<Integer, String>> PARAMS =
       Collections.synchronizedMap(new WeakHashMap<Object, Map<Integer, String>>());
+  // connect()·getOutputStream()에서 먼저 연결한 HttpURLConnection → 아직 응답을 못 받은 구간.
+  // getInputStream()이 이어 받아 연결·본문 전송·응답 헤더를 구간 하나로 잰다. 응답을 안 읽고 버린 연결은 GC가 치운다.
+  private static final Map<Object, Span> PENDING = Collections.synchronizedMap(new WeakHashMap<Object, Span>());
 
   public static final class Tx {
     final String id = UUID.randomUUID().toString();
@@ -191,6 +194,28 @@ public final class Tracer {
   // code: 응답 코드, 모르면 -1. 4xx는 Node 에이전트처럼 에러로 보지 않는다.
   public static void httpEnd(Span s, int code, Throwable thrown) {
     close(s, code >= 500 ? "HTTP " + code : code < 0 && thrown != null ? message(thrown) : null);
+  }
+
+  // connect()·getOutputStream() 뒤. 연결에 성공하면 구간을 열어 둔 채 PENDING에 맡기고, 실패하면 에러로 닫는다.
+  public static void httpConnected(Object conn, Span s, Throwable thrown) {
+    if (s != null && thrown == null) {
+      DEPTH.get()[0]--;
+      PENDING.put(conn, s);
+    } else {
+      httpEnd(s, -1, thrown);
+    }
+  }
+
+  // getInputStream() 앞. 먼저 연결해 둔 구간이 있으면 새로 만들지 않고 잇는다.
+  public static Span httpResume(Object conn, String method, String url) {
+    if (url != null && DEPTH.get()[0] == 0) {
+      Span s = PENDING.remove(conn);
+      if (s != null) {
+        DEPTH.get()[0]++;
+        return s;
+      }
+    }
+    return httpStart(method, url);
   }
 
   // setXxx(번호, 값) 또는 clearParameters(). 같은 문장 객체는 한 스레드가 쓰므로 안쪽 맵은 잠그지 않는다.

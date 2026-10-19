@@ -56,6 +56,9 @@
   - `getResponseCode()`도 이 메서드를 거친다. 기본 모드에서는 POST 본문도 이 안에서 보낸다.
   - https는 `HttpsURLConnectionImpl`이 이 클래스를 상속한 위임 객체를 부르므로 같은 지점에서 한 번 잡힌다.
   - 응답 본문을 읽는 시간은 들어가지 않는다.
+  - (최종 검토 후 추가) `connect()`·`getOutputStream()`도 계측한다. RestTemplate과 POST는 여기서 먼저 연결한다.
+    연결 전일 때만 구간을 열고, 실패하면 그 자리에서 에러로 닫는다. 성공하면 같은 연결의 `getInputStream()`이 그 구간을 이어 받아,
+    연결·본문 전송·응답 헤더가 구간 하나가 된다.
 - 이미 응답을 받았거나 실패한 연결(`inputStream` 또는 `rememberedException` 필드가 채워짐)에 다시 부르는 `getInputStream()`은
   저장된 결과를 돌려줄 뿐이라 기록하지 않는다. 앱에서 흔한 "코드 먼저 보고 본문 열기" 순서가 구간 두 개가 되지 않게 한다.
 - 응답 코드는 진입 후 `responseCode` 필드(`java.net.HttpURLConnection`의 protected 필드)를 직접 읽는다.

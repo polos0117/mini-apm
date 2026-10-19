@@ -208,7 +208,6 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
   test('HttpURLConnection 호출이 외부 구간으로 기록되고, 반복 호출·https 위임에도 호출당 하나다', async () => {
     assert.equal(await get('/http'), 200);
     const tx = await waitTx('GET /http');
-    assert.deepEqual(tx.spans.map((s) => s.type), ['http', 'http', 'http', 'http']);
     const [ok, err, nf, dead] = tx.spans;
     assert.deepEqual([ok.text, ok.error], [`GET ${stubUrl}/ok`, null]);
     assert.deepEqual([err.text, err.error], [`GET ${stubUrl}/err`, 'HTTP 500']);
@@ -216,6 +215,16 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.match(dead.text, /^GET https:\/\/127\.0\.0\.1:\d+\/$/);
     assert.match(dead.error, /Connection refused|timed out/); // Windows는 닫힌 포트에 2초쯤 재시도한 뒤 거절한다
     assert.ok(ok.offset >= 0 && ok.elapsed >= 0);
+  });
+
+  test('connect()·getOutputStream()에서 연결하는 호출도 구간 하나다: 성공은 응답까지 이어지고, 연결 실패는 에러로 남는다', async () => {
+    assert.equal(await get('/http'), 200);
+    const tx = await waitTx('GET /http', 2);
+    assert.equal(tx.spans.length, 6);
+    const [post, refused] = tx.spans.slice(4);
+    assert.deepEqual([post.type, post.text, post.error], ['http', `POST ${stubUrl}/ok`, null]);
+    assert.match(refused.text, /^GET http:\/\/127\.0\.0\.1:\d+\/$/);
+    assert.match(refused.error, /Connection refused|timed out/);
   });
 
   test('OkHttp 동기 호출이 외부 구간으로 기록된다', async () => {
