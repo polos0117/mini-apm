@@ -2,6 +2,7 @@
 const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const net = require('node:net');
 const path = require('node:path');
@@ -41,7 +42,7 @@ function freePort() {
 }
 
 // TestApp을 에이전트와 함께 띄운다. 출력은 돌려준 객체에 계속 쌓인다.
-async function startApp(collectorUrl) {
+async function startApp(collectorUrl, stubUrl = '') {
   const port = await freePort();
   const app = { port, stdout: '', stderr: '' };
   app.proc = spawn(javaBin('java'), [
@@ -49,7 +50,7 @@ async function startApp(collectorUrl) {
     `-Dderby.stream.error.file=${path.join(TMP, `derby-${port}.log`)}`,
     `-javaagent:${JAR}`,
     '-cp', [TMP, ...APP_CP].join(path.delimiter),
-    'TestApp', String(port),
+    'TestApp', String(port), stubUrl,
   ], { env: { ...process.env, APM_COLLECTOR: collectorUrl, APM_AGENT: 'test', APM_INTERVAL: '200', APM_APP_PACKAGE: 'TestApp' } });
   app.proc.stdout.on('data', (d) => (app.stdout += d));
   app.proc.stderr.on('data', (d) => (app.stderr += d));
@@ -63,7 +64,7 @@ async function startApp(collectorUrl) {
 }
 
 describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME}` }, () => {
-  let store, collector, collectorUrl, app;
+  let store, collector, collectorUrl, app, stub, stubUrl;
 
   before(async () => {
     build();
@@ -75,11 +76,19 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     collector = createCollector(store);
     await new Promise((r) => collector.server.listen(0, '127.0.0.1', r)); // 실제 수집 서버처럼 이 PC에서만
     collectorUrl = `http://localhost:${collector.server.address().port}`;
-    app = await startApp(collectorUrl);
+    // 테스트 앱이 부를 외부 서버
+    stub = http.createServer((req, res) => {
+      res.writeHead({ '/ok': 200, '/err': 500 }[req.url] ?? 404);
+      res.end('x');
+    });
+    await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+    stubUrl = `http://127.0.0.1:${stub.address().port}`;
+    app = await startApp(collectorUrl, stubUrl);
   });
   after(() => {
     app?.proc.kill();
     collector?.close();
+    stub?.close();
   });
 
   const get = (p) => fetch(`http://localhost:${app.port}${p}`).then((r) => r.status);
@@ -192,6 +201,19 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     ]);
     assert.equal(tx.spans[0].error, null);
     assert.ok(tx.spans[1].error); // 2·3번 값을 안 넣었으니 Derby가 거절한다
+  });
+
+  test('HttpURLConnection 호출이 외부 구간으로 기록되고, 반복 호출·https 위임에도 호출당 하나다', async () => {
+    assert.equal(await get('/http'), 200);
+    const tx = await waitTx('GET /http');
+    assert.deepEqual(tx.spans.map((s) => s.type), ['http', 'http', 'http', 'http']);
+    const [ok, err, nf, dead] = tx.spans;
+    assert.deepEqual([ok.text, ok.error], [`GET ${stubUrl}/ok`, null]);
+    assert.deepEqual([err.text, err.error], [`GET ${stubUrl}/err`, 'HTTP 500']);
+    assert.deepEqual([nf.text, nf.error], [`GET ${stubUrl}/nf`, null]); // 4xx는 에러가 아니다
+    assert.match(dead.text, /^GET https:\/\/127\.0\.0\.1:\d+\/$/);
+    assert.match(dead.error, /Connection refused|timed out/); // Windows는 닫힌 포트에 2초쯤 재시도한 뒤 거절한다
+    assert.ok(ok.offset >= 0 && ok.elapsed >= 0);
   });
 
   test('요청 밖에서 실행된 SQL(기동 시 create table)은 어디에도 기록되지 않는다', () => {

@@ -6,6 +6,7 @@ import static net.bytebuddy.matcher.ElementMatchers.isSubTypeOf;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.namedOneOf;
+import static net.bytebuddy.matcher.ElementMatchers.none;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
@@ -33,16 +34,18 @@ public final class Agent {
     System.out.println("[apm] mini-apm agent → " + Tracer.collector + " (" + Tracer.agent + ", 앱 패키지 "
         + (Tracer.appPackage == null ? "없음" : Tracer.appPackage) + ")");
 
+    AgentBuilder.Listener errors = new AgentBuilder.Listener.Adapter() {
+      @Override
+      public void onError(String type, ClassLoader loader, JavaModule module, boolean loaded, Throwable t) {
+        // ponytail: 대상인지 이름으로만 거른다. 하위 타입 판정 중 무관한 클래스에서 나는 오류는 숨긴다.
+        if (type.endsWith("StandardHostValve") || type.contains("Statement") || type.contains("Connection")) {
+          System.err.println("[apm] 계측 실패: " + type + " " + t);
+        }
+      }
+    };
+
     new AgentBuilder.Default()
-        .with(new AgentBuilder.Listener.Adapter() {
-          @Override
-          public void onError(String type, ClassLoader loader, JavaModule module, boolean loaded, Throwable t) {
-            // ponytail: 대상인지 이름으로만 거른다. 하위 타입 판정 중 무관한 클래스에서 나는 오류는 숨긴다.
-            if (type.endsWith("StandardHostValve") || type.contains("Statement") || type.contains("Connection")) {
-              System.err.println("[apm] 계측 실패: " + type + " " + t);
-            }
-          }
-        })
+        .with(errors)
         .type(named("org.apache.catalina.core.StandardHostValve"))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(RequestAdvice.class).on(named("invoke").and(takesArguments(2)))))
@@ -59,6 +62,19 @@ public final class Agent {
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(PrepareAdvice.class).on(not(isAbstract())
                 .and(namedOneOf("prepareStatement", "prepareCall")).and(takesArgument(0, String.class)))))
+        .installOn(inst);
+
+    // JDK의 HttpURLConnection은 부트스트랩 로더가 올린다. 기본 무시 규칙(부트스트랩 제외)을 풀고 이름이 같은 이 클래스 하나만,
+    // 이미 로드됐어도 다시 변환한다. 위 빌더와 나눠서 SQL 쪽 매칭(MyBatis 부트스트랩 프록시 제외)은 그대로 둔다.
+    // Advice가 부르는 Tracer는 Boot-Class-Path(mini-apm-boot.jar)로 부트스트랩에서 보인다.
+    new AgentBuilder.Default()
+        .disableClassFormatChanges()
+        .ignore(none())
+        .with(errors)
+        .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+        .type(named("sun.net.www.protocol.http.HttpURLConnection"))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(HttpAdvice.class).on(named("getInputStream").and(takesArguments(0)))))
         .installOn(inst);
 
     Tracer.startSender(interval);

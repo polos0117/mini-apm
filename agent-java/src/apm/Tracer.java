@@ -40,6 +40,7 @@ public final class Tracer {
   private static List<Tx> done = new ArrayList<>();                     // 전송 대기. Tracer.class로 잠근다
   private static boolean failing;                                        // 전송 스레드만 쓴다
   // SQL은 Hikari 프록시 → log4jdbc → 드라이버로 겹쳐 불린다. 가장 바깥 호출만 기록하려고 스레드별 깊이를 센다.
+  // 외부 호출과 SQL은 서로 겹쳐 불리지 않으므로 같은 카운터를 쓴다.
   private static final ThreadLocal<int[]> DEPTH = ThreadLocal.withInitial(() -> new int[1]);
   // PreparedStatement는 SQL을 꺼낼 방법이 없어서, prepareStatement 때 문장 객체와 SQL을 묶어 둔다.
   private static final Map<Object, String> SQL = Collections.synchronizedMap(new WeakHashMap<Object, String>());
@@ -65,13 +66,15 @@ public final class Tracer {
   }
 
   public static final class Span {
+    final String type; // "sql" 또는 "http"
     final String text;
     final long t0 = System.nanoTime();
     final double offset;
     double elapsed;
     String error;
 
-    Span(String text, double offset) {
+    Span(String type, String text, double offset) {
+      this.type = type;
       this.text = text;
       this.offset = offset;
     }
@@ -123,16 +126,38 @@ public final class Tracer {
     if (stmt != null && sql != null) SQL.put(stmt, sql);
   }
 
+  // 바깥 호출이고 요청 안이면 지금 트랜잭션을, 아니면 null. 깊이는 늘 올리고 짝이 되는 *End가 내린다.
+  private static Tx outer() {
+    if (DEPTH.get()[0]++ > 0) return null;
+    Tx tx = CURRENT.get();
+    if (tx != null && tx.spans.size() >= MAX_SPANS) {
+      tx.dropped++;
+      return null;
+    }
+    return tx;
+  }
+
+  private static Span open(Tx tx, String type, String text) {
+    Span s = new Span(type, text, ms(System.nanoTime() - tx.t0));
+    tx.spans.add(s);
+    return s;
+  }
+
+  private static void close(Span s, String error) {
+    DEPTH.get()[0]--;
+    if (s == null) return;
+    s.elapsed = ms(System.nanoTime() - s.t0);
+    s.error = error;
+  }
+
+  static String message(Throwable t) {
+    return t.getMessage() != null ? t.getMessage() : t.getClass().getName();
+  }
+
   public static Span sqlStart(Object stmt, Object[] args) {
-    int[] depth = DEPTH.get();
-    if (depth[0]++ > 0) return null;
     try {
-      Tx tx = CURRENT.get();
-      if (tx == null) return null; // 요청 밖의 SQL
-      if (tx.spans.size() >= MAX_SPANS) {
-        tx.dropped++;
-        return null;
-      }
+      Tx tx = outer();
+      if (tx == null) return null; // 겹친 호출, 요청 밖의 SQL
       String sql;
       if (args.length > 0 && args[0] instanceof String) {
         sql = (String) args[0];
@@ -141,19 +166,31 @@ public final class Tracer {
         Map<Integer, String> params = PARAMS.get(stmt);
         if (sql != null && params != null) sql = fill(sql, params);
       }
-      Span s = new Span(sql == null ? "?" : normalize(sql), ms(System.nanoTime() - tx.t0));
-      tx.spans.add(s);
-      return s;
+      return open(tx, "sql", sql == null ? "?" : normalize(sql));
     } catch (Throwable t) {
       return null;
     }
   }
 
   public static void sqlEnd(Span s, Throwable thrown) {
-    DEPTH.get()[0]--;
-    if (s == null) return;
-    s.elapsed = ms(System.nanoTime() - s.t0);
-    if (thrown != null) s.error = thrown.getMessage() != null ? thrown.getMessage() : thrown.getClass().getName();
+    close(s, thrown != null ? message(thrown) : null);
+  }
+
+  // url이 null이면 이미 응답을 받은 연결의 반복 호출이라 기록하지 않는다(깊이는 센다).
+  public static Span httpStart(String method, String url) {
+    try {
+      Tx tx = outer();
+      if (tx == null || url == null) return null;
+      String text = method + " " + url;
+      return open(tx, "http", text.length() > MAX_SQL ? text.substring(0, MAX_SQL) : text);
+    } catch (Throwable t) {
+      return null;
+    }
+  }
+
+  // code: 응답 코드, 모르면 -1. 4xx는 Node 에이전트처럼 에러로 보지 않는다.
+  public static void httpEnd(Span s, int code, Throwable thrown) {
+    close(s, code >= 500 ? "HTTP " + code : code < 0 && thrown != null ? message(thrown) : null);
   }
 
   // setXxx(번호, 값) 또는 clearParameters(). 같은 문장 객체는 한 스레드가 쓰므로 안쪽 맵은 잠그지 않는다.
@@ -340,7 +377,9 @@ public final class Tracer {
     int dropped;
     synchronized (t.spans) {
       for (Span s : t.spans) {
-        StringBuilder one = new StringBuilder(s.text.length() + 80).append("{\"type\":\"sql\",\"text\":");
+        StringBuilder one = new StringBuilder(s.text.length() + 80).append("{\"type\":");
+        str(one, s.type);
+        one.append(",\"text\":");
         str(one, s.text);
         one.append(",\"offset\":");
         num(one, s.offset);

@@ -1,5 +1,8 @@
 import java.io.File;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.ServerSocket;
+import java.net.URL;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -17,6 +20,7 @@ import org.apache.catalina.startup.Tomcat;
 public class TestApp {
   public static void main(String[] args) throws Exception {
     int port = Integer.parseInt(args[0]);
+    String stub = args.length > 1 ? args[1] : ""; // 외부 호출 대상(Node 테스트의 가짜 서버)
     Connection db = DriverManager.getConnection("jdbc:derby:memory:t;create=true");
     try (Statement s = db.createStatement()) { // 요청 밖의 SQL: 기록되면 안 된다
       s.execute("create table item (id int, name varchar(20))");
@@ -74,6 +78,12 @@ public class TestApp {
                 }
               }
               break;
+            case "/http":
+              call(stub + "/ok", true);   // 코드 먼저, 그다음 본문
+              call(stub + "/err", false); // 본문 먼저 → 500 예외 → 코드 확인
+              call(stub + "/nf", true);   // 404
+              call("https://127.0.0.1:" + deadPort() + "/", false); // 연결 실패, https 위임 객체
+              break;
             case "/slow":
               Thread.sleep(1500);
               break;
@@ -90,5 +100,28 @@ public class TestApp {
     tomcat.start();
     System.out.println("READY");
     tomcat.getServer().await();
+  }
+
+  // 앱에서 흔한 두 순서: 코드를 먼저 보고 본문 열기, 본문을 먼저 열고 실패하면 코드 보기. 어느 쪽이든 구간은 하나여야 한다.
+  static void call(String url, boolean codeFirst) {
+    HttpURLConnection c = null;
+    try {
+      c = (HttpURLConnection) new URL(url).openConnection();
+      c.setConnectTimeout(2000);
+      if (codeFirst && c.getResponseCode() >= 400) return;
+      c.getInputStream().close();
+    } catch (IOException e) {
+      try {
+        if (c != null) c.getResponseCode();
+      } catch (IOException ignored) {
+        // 연결 실패
+      }
+    }
+  }
+
+  static int deadPort() throws IOException {
+    try (ServerSocket s = new ServerSocket(0)) {
+      return s.getLocalPort(); // 닫고 돌려주므로 연결하면 거절된다
+    }
   }
 }
