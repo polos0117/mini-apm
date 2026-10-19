@@ -56,6 +56,8 @@
   - `getResponseCode()`도 이 메서드를 거친다. 기본 모드에서는 POST 본문도 이 안에서 보낸다.
   - https는 `HttpsURLConnectionImpl`이 이 클래스를 상속한 위임 객체를 부르므로 같은 지점에서 한 번 잡힌다.
   - 응답 본문을 읽는 시간은 들어가지 않는다.
+- 이미 응답을 받았거나 실패한 연결(`inputStream` 또는 `rememberedException` 필드가 채워짐)에 다시 부르는 `getInputStream()`은
+  저장된 결과를 돌려줄 뿐이라 기록하지 않는다. 앱에서 흔한 "코드 먼저 보고 본문 열기" 순서가 구간 두 개가 되지 않게 한다.
 - 응답 코드는 진입 후 `responseCode` 필드(`java.net.HttpURLConnection`의 protected 필드)를 직접 읽는다.
   `getResponseCode()`를 다시 부르면 실패한 연결을 재시도할 수 있어서 부르지 않는다.
 - 이 클래스는 부트스트랩 로더가 올린다. 그래서:
@@ -88,8 +90,8 @@ Node 테스트가 127.0.0.1에 가짜 서버를 띄운다(`/ok` 200, `/err` 500,
 - `/slow` 처리 중 항목의 `where`가 `TestApp$1.doGet:<줄> → Thread.sleep`.
 - 기동 안내 줄에 `앱 패키지 TestApp`.
 - `/http`(`HttpURLConnection`): 구간 4개, 순서대로
-  1. `GET <stub>/ok` — `getInputStream()`, 에러 없음
-  2. `GET <stub>/err` — `getInputStream()`이 예외, 에러 `HTTP 500`
+  1. `GET <stub>/ok` — `getResponseCode()` 뒤 `getInputStream()`, 에러 없음(반복 호출은 구간을 더 만들지 않는다)
+  2. `GET <stub>/err` — `getInputStream()`이 예외 뒤 `getResponseCode()`, 에러 `HTTP 500`
   3. `GET <stub>/nf` — `getResponseCode()`, 에러 없음
   4. `GET https://127.0.0.1:<닫힌 포트>/` — 연결 실패, 에러에 `Connection refused`, https 위임에도 구간은 하나
 - `/okhttp`: 구간 3개 — `/ok` 에러 없음, `/err` 에러 `HTTP 500`, 닫힌 포트 연결 실패 에러.
