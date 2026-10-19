@@ -50,7 +50,7 @@ async function startApp(collectorUrl) {
     `-javaagent:${JAR}`,
     '-cp', [TMP, ...APP_CP].join(path.delimiter),
     'TestApp', String(port),
-  ], { env: { ...process.env, APM_COLLECTOR: collectorUrl, APM_AGENT: 'test', APM_INTERVAL: '200' } });
+  ], { env: { ...process.env, APM_COLLECTOR: collectorUrl, APM_AGENT: 'test', APM_INTERVAL: '200', APM_APP_PACKAGE: 'TestApp' } });
   app.proc.stdout.on('data', (d) => (app.stdout += d));
   app.proc.stderr.on('data', (d) => (app.stderr += d));
   try {
@@ -91,7 +91,7 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
   }
 
   test('기동하면 에이전트 안내 한 줄이 출력된다', () => {
-    assert.ok(app.stdout.includes(`[apm] mini-apm agent → ${collectorUrl} (test)`), app.stdout);
+    assert.ok(app.stdout.includes(`[apm] mini-apm agent → ${collectorUrl} (test, 앱 패키지 TestApp)`), app.stdout);
   });
 
   test('요청 하나가 트랜잭션 하나로 저장된다', async () => {
@@ -131,6 +131,14 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.equal(await res, 200);
     const tx = await waitTx('GET /slow');
     assert.ok(tx.elapsed >= 1400, String(tx.elapsed));
+  });
+
+  test('처리 중인 요청에 지금 실행 중인 앱 메서드와 맨 위 프레임이 보인다', async () => {
+    const res = get('/slow');
+    const item = await waitFor(
+      () => store.active().find((a) => a.name === 'GET /slow' && /sleep/.test(a.where ?? '')), '현재 위치', 5000);
+    assert.match(item.where, /^TestApp\$1\.doGet:\d+ → Thread\.sleep$/);
+    assert.equal(await res, 200);
   });
 
   test('수집 서버가 꺼져 있어도 앱은 정상 응답하고 실패 메시지는 한 번만 나온다', async (t) => {

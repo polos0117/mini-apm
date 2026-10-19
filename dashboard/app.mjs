@@ -130,7 +130,7 @@ function showStats(s) {
 function showActive(list) {
   if (list.length === 0) return $('active').replaceChildren('없음');
   const table = document.createElement('table');
-  // 좁은 패널이라 이름·시간 한 줄, 마지막 호출은 그 아래 한 줄. 넘치면 …로 자르고 전체는 툴팁으로.
+  // 좁은 패널이라 ① 이름·시간 ② 현재 위치 ③ 마지막 호출을 각각 한 줄로. 넘치면 …로 자르고 전체는 툴팁으로.
   for (const a of list) {
     const level = a.elapsed >= 3000 ? 'err' : a.elapsed >= 1000 ? 'warn' : '';
     const tr = row('td', [a.name, `${(a.elapsed / 1000).toFixed(1)}초`]);
@@ -139,12 +139,13 @@ function showActive(list) {
     tr.children[0].title = a.name;
     tr.children[1].className = 'num';
     table.append(tr);
-    if (a.lastSpan) {
-      const sub = row('td', [a.lastSpan]);
+    for (const text of [a.where, a.lastSpan]) {
+      if (!text) continue;
+      const sub = row('td', [text]);
       sub.className = `sub ${level}`;
       sub.firstChild.colSpan = 2;
       sub.firstChild.className = 'ell';
-      sub.firstChild.title = a.lastSpan;
+      sub.firstChild.title = text;
       table.append(sub);
     }
   }

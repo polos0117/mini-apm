@@ -23,13 +23,15 @@ public final class Agent {
   public static void premain(String args, Instrumentation inst) {
     Tracer.collector = env("APM_COLLECTOR", Tracer.collector);
     Tracer.agent = env("APM_AGENT", Tracer.agent);
+    Tracer.appPackage = env("APM_APP_PACKAGE", mainPackage(System.getProperty("sun.java.command")));
     long interval = 1000;
     try {
       interval = Long.parseLong(env("APM_INTERVAL", "1000"));
     } catch (NumberFormatException ignored) {
       // 기본값을 쓴다
     }
-    System.out.println("[apm] mini-apm agent → " + Tracer.collector + " (" + Tracer.agent + ")");
+    System.out.println("[apm] mini-apm agent → " + Tracer.collector + " (" + Tracer.agent + ", 앱 패키지 "
+        + (Tracer.appPackage == null ? "없음" : Tracer.appPackage) + ")");
 
     new AgentBuilder.Default()
         .with(new AgentBuilder.Listener.Adapter() {
@@ -65,5 +67,15 @@ public final class Agent {
   private static String env(String key, String def) {
     String v = System.getenv(key);
     return v == null || v.isEmpty() ? def : v;
+  }
+
+  // main 클래스의 패키지 + '.'. Tomcat Bootstrap, fat jar 런처, -jar, 패키지 없는 main이면 모른다(null).
+  static String mainPackage(String command) {
+    if (command == null || command.trim().isEmpty()) return null;
+    String main = command.trim().split("\\s+")[0];
+    int dot = main.lastIndexOf('.');
+    if (dot < 0 || main.endsWith(".jar") || main.startsWith("org.apache.")
+        || main.startsWith("org.springframework.boot.loader.")) return null;
+    return main.substring(0, dot + 1);
   }
 }

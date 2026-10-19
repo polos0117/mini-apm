@@ -32,6 +32,7 @@ public final class Tracer {
 
   public static String collector = "http://localhost:7700";
   public static String agent = "java";
+  public static String appPackage; // 앱 클래스 이름 접두어(예: org.kipa.ipfinance.). null이면 모른다
 
   // Tomcat은 요청 하나를 스레드 하나가 끝까지 처리하므로 '지금 어느 트랜잭션인가'는 스레드에 둔다.
   private static final ThreadLocal<Tx> CURRENT = new ThreadLocal<>();
@@ -51,6 +52,7 @@ public final class Tracer {
     final String name;
     final long start = System.currentTimeMillis();
     final long t0 = System.nanoTime();
+    final Thread thread = Thread.currentThread(); // begin은 요청 스레드에서 불린다. 처리 중 위치를 읽을 때 쓴다
     final List<Span> spans = Collections.synchronizedList(new ArrayList<Span>());
     int dropped;
     double elapsed;
@@ -280,6 +282,31 @@ public final class Tracer {
 
   // ---- JSON: 앱의 Jackson 버전과 부딪히지 않게 직접 쓴다 ----
 
+  // 처리 중 요청이 지금 어디서 멈춰 있는지: 첫 앱 프레임(줄 번호 포함)과, 다르면 맨 위 프레임.
+  // 예: EvlServiceImpl.selectList:120 → SocketInputStream.socketRead0
+  static String where(StackTraceElement[] st) {
+    if (st.length == 0) return null;
+    StackTraceElement app = null;
+    if (appPackage != null) {
+      for (StackTraceElement e : st) {
+        String c = e.getClassName();
+        if (c.startsWith(appPackage) && !c.contains("$$")) { // $$: CGLIB 프록시
+          app = e;
+          break;
+        }
+      }
+    }
+    String top = simple(st[0]);
+    if (app == null) return top;
+    String a = simple(app) + ":" + app.getLineNumber();
+    return app == st[0] ? a : a + " → " + top;
+  }
+
+  static String simple(StackTraceElement e) {
+    String c = e.getClassName();
+    return c.substring(c.lastIndexOf('.') + 1) + "." + e.getMethodName();
+  }
+
   static String active(Collection<Tx> open, long now) {
     StringBuilder b = new StringBuilder(256).append('[');
     boolean first = true;
@@ -298,6 +325,8 @@ public final class Tracer {
       num(b, ms(now - t.t0));
       b.append(",\"lastSpan\":");
       str(b, last);
+      b.append(",\"where\":");
+      str(b, where(t.thread.getStackTrace()));
       b.append('}');
     }
     return b.append(']').toString();
