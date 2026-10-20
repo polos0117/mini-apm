@@ -43,7 +43,12 @@
   #apps { display: flex; flex-wrap: wrap; gap: 6px; }
   button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; font: inherit; cursor: pointer; }
   button:disabled { cursor: default; color: var(--dim); }
-  #apps button.on { border-color: var(--ok); color: var(--ok); }
+  #apps button.on, #ranges button.on { border-color: var(--ok); color: var(--ok); }
+  #ranges { font-weight: 400; margin-left: 8px; }
+  #routes { max-height: 360px; overflow: auto; }
+  #routes table { table-layout: fixed; }
+  #routes th { cursor: pointer; user-select: none; }
+  #routes th:not(:first-child), #routes td:not(:first-child) { width: 92px; }
   #apps button.down::after { content: ' ●'; color: var(--err); }
   #settings { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--dim); font-size: 13px; }
   #settings input[type=number] { width: 56px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
@@ -77,6 +82,7 @@
     <div class="panel"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
   </div>
   <section class="panel"><h2>최근 에러</h2><div id="errlist">없음</div></section>
+  <section class="panel"><h2>API별 통계 <span id="ranges"><button data-range="10m">최근 10분</button> <button data-range="all">서버 켠 뒤 전체</button></span></h2><div id="routes">없음</div></section>
   <section class="panel"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
   <section class="panel"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
   <script type="module" src="app.mjs"></script>

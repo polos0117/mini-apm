@@ -26,3 +26,25 @@ export function downSec(v) {
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 && n <= 600 ? n : 10;
 }
+
+// API별 통계의 열(표 왼쪽부터). key = API 이름, 나머지는 숫자
+export const ROUTE_COLS = ['key', 'count', 'errors', 'avg', 'p95', 'max', 'total'];
+const byKey = (a, b) => a.key.localeCompare(b.key, 'ko');
+
+// sort = { col, desc }. 같은 값이면 API 이름 순
+export function sortRoutes(rows, sort) {
+  const dir = sort.desc ? -1 : 1;
+  const cmp = sort.col === 'key' ? byKey : (a, b) => a[sort.col] - b[sort.col];
+  return [...rows].sort((a, b) => dir * cmp(a, b) || byKey(a, b));
+}
+
+// 머리글을 눌렀을 때: 같은 열이면 방향을 뒤집고, 새 열은 숫자면 큰 순·API면 가나다순
+export function nextSort(sort, col) {
+  return sort.col === col ? { col, desc: !sort.desc } : { col, desc: col !== 'key' };
+}
+
+// localStorage의 "열:방향". 모르는 열이면 총 시간 큰 순
+export function routeSort(saved) {
+  const [col, dir] = String(saved).split(':');
+  return ROUTE_COLS.includes(col) ? { col, desc: dir !== 'asc' } : { col: 'total', desc: true };
+}

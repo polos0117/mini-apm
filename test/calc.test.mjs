@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, pickInRect, selfTime, yMax } from '../dashboard/calc.mjs';
+import { downSec, nextSort, pickInRect, routeSort, selfTime, sortRoutes, yMax } from '../dashboard/calc.mjs';
 
 test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
   const spans = [
@@ -39,4 +39,28 @@ test('yMax: 1·3·5·10초 단계, 넘으면 1초 단위 올림', () => {
   assert.equal(yMax(4200), 5000);
   assert.equal(yMax(10000), 10000);
   assert.equal(yMax(12345), 13000);
+});
+
+test('sortRoutes: 숫자 열은 값으로, API 열은 가나다로, 같으면 API 순', () => {
+  const rows = [
+    { key: 'GET /b', total: 10 },
+    { key: 'GET /a', total: 10 },
+    { key: 'GET /c', total: 30 },
+  ];
+  assert.deepEqual(sortRoutes(rows, { col: 'total', desc: true }).map((r) => r.key), ['GET /c', 'GET /a', 'GET /b']);
+  assert.deepEqual(sortRoutes(rows, { col: 'key', desc: false }).map((r) => r.key), ['GET /a', 'GET /b', 'GET /c']);
+  assert.equal(rows[0].key, 'GET /b'); // 원본은 그대로
+});
+
+test('nextSort: 같은 열은 방향을 뒤집고, 새 열은 숫자면 큰 순·API면 가나다순', () => {
+  assert.deepEqual(nextSort({ col: 'total', desc: true }, 'total'), { col: 'total', desc: false });
+  assert.deepEqual(nextSort({ col: 'total', desc: true }, 'count'), { col: 'count', desc: true });
+  assert.deepEqual(nextSort({ col: 'total', desc: true }, 'key'), { col: 'key', desc: false });
+});
+
+test('routeSort: 기억해 둔 "열:방향"을 읽고, 모르는 값이면 총 시간 큰 순', () => {
+  assert.deepEqual(routeSort('p95:asc'), { col: 'p95', desc: false });
+  assert.deepEqual(routeSort('count:desc'), { col: 'count', desc: true });
+  assert.deepEqual(routeSort('nope:asc'), { col: 'total', desc: true });
+  assert.deepEqual(routeSort(''), { col: 'total', desc: true });
 });

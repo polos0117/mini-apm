@@ -1,11 +1,14 @@
 import { createAlerts } from './alerts.mjs';
-import { downSec, pickInRect, selfTime, yMax } from './calc.mjs';
+import { downSec, nextSort, pickInRect, ROUTE_COLS, routeSort, selfTime, sortRoutes, yMax } from './calc.mjs';
 
 const WINDOW_MS = 5 * 60 * 1000;            // X-View에 보이는 시간
 const PAD = { l: 52, r: 24, t: 8, b: 22 };   // 축 글자 자리
 const MAX_ROWS = 200;                        // ponytail: 목록은 200줄까지, 더 필요하면 페이지 나누기
 const MAX_ERRORS = 50;                       // 최근 에러 패널 줄 수
 const MAX_BANNER = 5;                        // 빨간 줄에 보이는 경보 수
+const MAX_ROUTE_ROWS = 50;                   // API별 통계 줄 수
+const ROUTE_EVERY_MS = 5000;                 // API별 통계 갱신 간격
+const ROUTE_HEAD = { key: 'API', count: '횟수', errors: '에러', avg: '평균(ms)', p95: 'p95(ms)', max: '최대(ms)', total: '총 시간(s)' };
 const SHAPES = ['●', '▲', '■', '◆'];         // 앱마다 점 모양(agents 순서로 반복)
 const ZERO = { tps: 0, avg: 0, p95: 0, errors: 0 };
 const KIND = { method: '메서드', mapper: '매퍼', sql: 'SQL', http: '외부', exception: '예외' }; // 상세의 구간 종류
@@ -47,6 +50,9 @@ const opts = {
   downMs: downSec(load('apm.downSec', '10')) * 1000,
 };
 const alerts = createAlerts();
+let routeRange = load('apm.routeRange', '10m') === 'all' ? 'all' : '10m';
+let routeOrder = routeSort(load('apm.routeSort', ''));
+let routeData = null; // 마지막으로 받은 /routes. 받기에 실패하면 이전 것을 그대로 보인다
 
 const visible = (p) => !selected || p.agent === selected;
 const tag = (agent) => (selected ? '' : `[${agent}] `);
@@ -195,6 +201,7 @@ function showApps() {
         save('apm.app', n);
         $('picked').replaceChildren();
         render();
+        fetchRoutes();
       };
       return b;
     }));
@@ -228,6 +235,70 @@ function showErrors() {
   }
   $('errlist').replaceChildren(table);
 }
+
+// ---- API별 통계 ----
+
+async function fetchRoutes() {
+  try {
+    const res = await fetch(`/routes?range=${routeRange}`);
+    if (res.ok) routeData = await res.json();
+  } catch {
+    // 수집 서버가 잠시 꺼져 있으면 표는 그대로
+  }
+  showRoutes();
+}
+
+function showRoutes() {
+  for (const b of $('ranges').children) b.classList.toggle('on', b.dataset.range === routeRange);
+  if (!routeData) return;
+  const rows = sortRoutes(routeData.rows.filter(visible), routeOrder);
+  if (rows.length === 0) return $('routes').replaceChildren('없음');
+  const table = document.createElement('table');
+  const head = row('th', ROUTE_COLS.map((c) => ROUTE_HEAD[c] + (c === routeOrder.col ? (routeOrder.desc ? ' ▼' : ' ▲') : '')));
+  ROUTE_COLS.forEach((c, i) => {
+    head.children[i].onclick = () => {
+      routeOrder = nextSort(routeOrder, c);
+      save('apm.routeSort', `${routeOrder.col}:${routeOrder.desc ? 'desc' : 'asc'}`);
+      showRoutes();
+    };
+  });
+  table.append(head);
+  const approx = routeData.range === 'all' ? '≈' : '';
+  for (const r of rows.slice(0, MAX_ROUTE_ROWS)) {
+    const tr = row('td', [tag(r.agent) + r.key, r.count, r.errors, r.avg, approx + r.p95, r.max, (r.total / 1000).toFixed(1)]);
+    tr.className = 'row';
+    tr.children[0].className = 'text';
+    for (const td of [...tr.children].slice(1)) td.className = 'num';
+    if (r.errors > 0) tr.children[2].className = 'num err';
+    tr.onclick = () => pickRoute(r);
+    table.append(tr);
+  }
+  if (rows.length > MAX_ROUTE_ROWS) table.append(row('td', [`… 외 ${rows.length - MAX_ROUTE_ROWS}개`]));
+  $('routes').replaceChildren(table);
+}
+
+// 그 API의 최근 10분 트랜잭션을 "고른 트랜잭션"에
+async function pickRoute(r) {
+  let list;
+  try {
+    const res = await fetch(`/routes/txs?agent=${encodeURIComponent(r.agent)}&key=${encodeURIComponent(r.key)}`);
+    list = await res.json();
+  } catch {
+    return;
+  }
+  if (list.length === 0) return $('picked').replaceChildren(row('td', ['최근 10분 안에 이 API 요청이 없습니다.']));
+  showPicked(list);
+}
+
+for (const b of $('ranges').children) {
+  b.onclick = () => {
+    routeRange = b.dataset.range;
+    save('apm.routeRange', routeRange);
+    fetchRoutes();
+  };
+}
+fetchRoutes();
+setInterval(fetchRoutes, ROUTE_EVERY_MS);
 
 // ---- 경보 ----
 
