@@ -34,6 +34,13 @@ public class TestApp {
       s.execute("insert into item values (1, 'a')");
     }
 
+    org.apache.ibatis.session.Configuration mybatis = new org.apache.ibatis.session.Configuration(
+        new org.apache.ibatis.mapping.Environment("t", new org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory(),
+            new org.apache.ibatis.datasource.unpooled.UnpooledDataSource(
+                "org.apache.derby.jdbc.EmbeddedDriver", "jdbc:derby:memory:t", null, null)));
+    mybatis.addMapper(TestAppItemMapper.class);
+    TestAppOrderController orders = new TestAppOrderController(new TestAppOrderServiceImpl(
+        new org.apache.ibatis.session.SqlSessionFactoryBuilder().build(mybatis)));
     log.error("기동 중 에러"); // 요청 밖: 기록되면 안 된다
     Tomcat tomcat = new Tomcat();
     tomcat.setPort(port);
@@ -129,6 +136,15 @@ public class TestApp {
                 }
               }
               break;
+            case "/flow":
+              orders.save(1);
+              break;
+            case "/flowfail":
+              orders.saveFail();
+              break;
+            case "/flowslow":
+              orders.saveSlow(1);
+              break;
             case "/caught": // 잡아서 로그만 남기고 200
               try {
                 throw new IllegalStateException("재고 없음");
@@ -217,4 +233,68 @@ public class TestApp {
       return s.getLocalPort(); // 닫고 돌려주므로 연결하면 거절된다
     }
   }
+}
+
+// 앱 메서드 흐름 테스트용. 이름이 앱 패키지(TestApp)로 시작하고 Controller·ServiceImpl로 끝나야 계측된다.
+class TestAppOrderController {
+  private final TestAppOrderServiceImpl service;
+
+  TestAppOrderController(TestAppOrderServiceImpl service) {
+    this.service = service;
+  }
+
+  public String save(int id) {
+    return service.saveOrder(id);
+  }
+
+  public String saveFail() {
+    try {
+      return service.failOrder();
+    } catch (IllegalStateException e) {
+      return "fail"; // 잡고 로그는 안 남긴다
+    }
+  }
+
+  public String saveSlow(int id) throws InterruptedException {
+    return service.saveSlow(id);
+  }
+}
+
+class TestAppOrderServiceImpl {
+  private final org.apache.ibatis.session.SqlSessionFactory factory;
+  private int count;
+
+  TestAppOrderServiceImpl(org.apache.ibatis.session.SqlSessionFactory factory) {
+    this.factory = factory;
+  }
+
+  public int getCount() { // getter: 구간이 되면 안 된다
+    return count;
+  }
+
+  public String saveOrder(int id) {
+    count = getCount() + 1;
+    try (org.apache.ibatis.session.SqlSession s = factory.openSession(true)) {
+      return s.getMapper(TestAppItemMapper.class).name(id);
+    }
+  }
+
+  public String failOrder() {
+    throw new IllegalStateException("재고 없음");
+  }
+
+  public String saveSlow(int id) throws InterruptedException {
+    String name = saveOrder(id);
+    pause(); // SQL 뒤 메서드에서 멈춤: 처리 중 목록의 마지막 호출은 그래도 SQL이어야 한다
+    return name;
+  }
+
+  public void pause() throws InterruptedException {
+    Thread.sleep(1500);
+  }
+}
+
+interface TestAppItemMapper {
+  @org.apache.ibatis.annotations.Select("select name from item where id = #{id}")
+  String name(int id);
 }

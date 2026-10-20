@@ -173,6 +173,39 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.ok(all.every((t) => t.spans.every((s) => s.text !== '기동 중 에러')));
   });
 
+  const flow = (tx) => tx.spans.map((s) => [s.type, s.type === 'sql' ? s.text.slice(0, 11) : s.text, s.depth]);
+
+  test('Controller → Service → 매퍼 → SQL이 들여쓰기 순서로 남고, getter·프록시는 줄이 없다', async () => {
+    assert.equal(await get('/flow'), 200);
+    const tx = await waitTx('GET /flow');
+    assert.deepEqual(flow(tx), [
+      ['method', 'TestAppOrderController.save', 0],
+      ['method', 'TestAppOrderServiceImpl.saveOrder', 1],
+      ['mapper', 'TestAppItemMapper.name', 2],
+      ['sql', 'select name', 3],
+    ]);
+    const [ctrl, svc, mapper, sql] = tx.spans;
+    assert.ok(ctrl.elapsed >= svc.elapsed && svc.elapsed >= mapper.elapsed && mapper.elapsed >= sql.elapsed);
+  });
+
+  test('메서드가 던진 예외는 그 줄에 남고, 잡혔으면 요청은 에러가 아니다', async () => {
+    assert.equal(await get('/flowfail'), 200);
+    const tx = await waitTx('GET /flowfail');
+    assert.deepEqual(tx.spans.map((s) => [s.text, s.depth, s.error]), [
+      ['TestAppOrderController.saveFail', 0, null],
+      ['TestAppOrderServiceImpl.failOrder', 1, 'IllegalStateException: 재고 없음'],
+    ]);
+    assert.equal(tx.error, null);
+  });
+
+  test('처리 중 목록의 마지막 호출은 메서드가 아니라 SQL', async () => {
+    const res = get('/flowslow');
+    const item = await waitFor(
+      () => store.active().find((a) => a.name === 'GET /flowslow' && /pause/.test(a.where ?? '')), '처리 중 목록', 5000);
+    assert.match(item.lastSpan, /^select name from item/);
+    assert.equal(await res, 200);
+  });
+
   test('정적 파일 요청은 기록하지 않는다', async () => {
     assert.equal(await get('/app.js'), 200);
     assert.equal(await get('/hello'), 200);

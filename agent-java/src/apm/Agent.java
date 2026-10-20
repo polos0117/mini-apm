@@ -1,8 +1,17 @@
 package apm;
 
+import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
+import static net.bytebuddy.matcher.ElementMatchers.isConstructor;
+import static net.bytebuddy.matcher.ElementMatchers.isGetter;
 import static net.bytebuddy.matcher.ElementMatchers.isInterface;
+import static net.bytebuddy.matcher.ElementMatchers.isPublic;
+import static net.bytebuddy.matcher.ElementMatchers.isSetter;
+import static net.bytebuddy.matcher.ElementMatchers.isStatic;
 import static net.bytebuddy.matcher.ElementMatchers.isSubTypeOf;
+import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
+import static net.bytebuddy.matcher.ElementMatchers.nameContains;
+import static net.bytebuddy.matcher.ElementMatchers.nameEndsWith;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.namedOneOf;
@@ -46,7 +55,7 @@ public final class Agent {
       }
     };
 
-    new AgentBuilder.Default()
+    AgentBuilder main = new AgentBuilder.Default()
         .with(errors)
         .type(named("org.apache.catalina.core.StandardHostValve"))
         .transform((builder, type, loader, module) ->
@@ -72,7 +81,22 @@ public final class Agent {
         .type(named("ch.qos.logback.classic.Logger"))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(LogAdvice.class).on(named("callAppenders").and(takesArguments(1)))))
-        .installOn(inst);
+        // MyBatis: 모든 매퍼 호출이 지나는 Executor. BaseExecutor처럼 추상 클래스도 몸체 있는 메서드는 포함
+        .type(hasSuperType(named("org.apache.ibatis.executor.Executor")).and(not(isInterface())))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(MapperAdvice.class).on(not(isAbstract()).and(
+                named("query").and(takesArguments(4)).or(named("update").and(takesArguments(2)))))));
+    // 앱 메서드 흐름: 앱 패키지의 *Controller·*ServiceImpl·*Service. $가 든 이름(CGLIB 프록시, 안쪽 클래스)은 빼서 한 호출이 한 줄
+    if (Tracer.appPackage != null) {
+      main = main.type(nameStartsWith(Tracer.appPackage)
+              .and(nameEndsWith("Controller").or(nameEndsWith("ServiceImpl")).or(nameEndsWith("Service")))
+              .and(not(nameContains("$"))).and(not(isInterface())))
+          .transform((builder, type, loader, module) ->
+              builder.visit(Advice.to(MethodAdvice.class).on(isPublic().and(not(isStatic())).and(not(isAbstract()))
+                  .and(not(isConstructor())).and(not(isGetter())).and(not(isSetter())).and(not(isSynthetic()))
+                  .and(not(namedOneOf("toString", "equals", "hashCode"))))));
+    }
+    main.installOn(inst);
 
     // JDK 클래스(HttpURLConnection, Throwable)는 부트스트랩 로더가 올린다. 기본 무시 규칙(부트스트랩 제외)을 풀고 이름이 같은 클래스만,
     // 이미 로드됐어도 다시 변환한다. 위 빌더와 나눠서 SQL 쪽 매칭(MyBatis 부트스트랩 프록시 제외)은 그대로 둔다.
