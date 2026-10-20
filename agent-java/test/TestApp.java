@@ -77,6 +77,24 @@ public class TestApp {
                 s.executeQuery(in.append(") and name <> 'end'").toString()).close();
               }
               break;
+            case "/longslow": // 긴 SQL 뒤 멈춘 요청: 처리 중 목록의 마지막 호출은 짧게 잘려야 한다
+              StringBuilder in2 = new StringBuilder("select name from item where id in (0");
+              for (int i = 1; i <= 1200; i++) in2.append(", ").append(i);
+              try (Statement s = db.createStatement()) {
+                s.executeQuery(in2.append(")").toString()).close();
+              }
+              Thread.sleep(1500);
+              break;
+            case "/heavy": // 긴 SQL(약 45,000자) 1000번: 보낼 수 없는 구간까지 힙에 쌓으면 -Xmx96m을 넘는다
+              StringBuilder in3 = new StringBuilder("select name from item where id = ? and id in (0");
+              for (int i = 1; i <= 8000; i++) in3.append(", ").append(i);
+              try (PreparedStatement p = db.prepareStatement(in3.append(")").toString())) {
+                for (int i = 0; i < 1000; i++) {
+                  p.setInt(1, i);
+                  p.executeQuery().close();
+                }
+              }
+              break;
             case "/many": // N+1: 한글이 섞인 긴 SQL 1100번 → 그대로 보내면 수집 서버 1MB 한도를 넘는다
               StringBuilder pad = new StringBuilder();
               for (int i = 0; i < 600; i++) pad.append('가');

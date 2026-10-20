@@ -26,6 +26,7 @@ public final class Tracer {
   static final int MAX_BUFFER = 5000; // 전송 대기 트랜잭션 수
   static final int MAX_SQL = 100_000; // SQL 문장·URL 길이(문자). 한글이라도 약 300KB라 MAX_BODY 안에 든다
   static final int MAX_PARAM = 200;   // 바인드 값 하나의 길이(문자)
+  static final int MAX_LAST = 1000;   // 처리 중 목록에 싣는 마지막 호출 길이(문자)
   static final int MAX_BODY = 900_000; // 한 번에 보내는 바이트. 수집 서버 한도(1MB)보다 여유 있게
   static final Set<String> STATIC_EXT = new HashSet<>(Arrays.asList(
       "js", "css", "png", "jpg", "gif", "svg", "ico", "woff", "woff2", "map"));
@@ -59,6 +60,7 @@ public final class Tracer {
     final Thread thread = Thread.currentThread(); // begin은 요청 스레드에서 불린다. 처리 중 위치를 읽을 때 쓴다
     final List<Span> spans = Collections.synchronizedList(new ArrayList<Span>());
     int dropped;
+    int chars; // 담은 구간 글자 수. MAX_BODY를 넘으면 어차피 못 보내므로 더 담지 않는다(앱 힙 보호)
     double elapsed;
     int status;
     String error;
@@ -133,7 +135,7 @@ public final class Tracer {
   private static Tx outer() {
     if (DEPTH.get()[0]++ > 0) return null;
     Tx tx = CURRENT.get();
-    if (tx != null && tx.spans.size() >= MAX_SPANS) {
+    if (tx != null && (tx.spans.size() >= MAX_SPANS || tx.chars >= MAX_BODY)) {
       tx.dropped++;
       return null;
     }
@@ -142,6 +144,7 @@ public final class Tracer {
 
   private static Span open(Tx tx, String type, String text) {
     Span s = new Span(type, text, ms(System.nanoTime() - tx.t0));
+    tx.chars += text.length();
     tx.spans.add(s);
     return s;
   }
@@ -379,6 +382,8 @@ public final class Tracer {
       synchronized (t.spans) {
         if (!t.spans.isEmpty()) last = t.spans.get(t.spans.size() - 1).text;
       }
+      // 처리 중 목록은 매 전송에 실리므로 짧게. 멈춘 요청이 많아도 본문이 수집 서버 한도(1MB)를 넘지 않게 한다
+      if (last != null && last.length() > MAX_LAST) last = last.substring(0, MAX_LAST) + "...";
       b.append("{\"id\":");
       str(b, t.id);
       b.append(",\"name\":");

@@ -48,6 +48,7 @@ async function startApp(collectorUrl, stubUrl = '') {
   const port = await freePort();
   const app = { port, stdout: '', stderr: '' };
   app.proc = spawn(javaBin('java'), [
+    '-Xmx96m', // 에이전트가 앱 힙을 잡아먹지 않는지 보려고 작게
     '-Dfile.encoding=UTF-8', // Java 8 콘솔 기본 인코딩(cp949)으로는 한글 메시지를 비교할 수 없다
     `-Dderby.stream.error.file=${path.join(TMP, `derby-${port}.log`)}`,
     `-javaagent:${JAR}`,
@@ -211,6 +212,24 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     const sql = tx.spans[0].text;
     assert.ok(sql.length > 5000, String(sql.length));
     assert.match(sql, /, 1200\) and name <> 'end'$/);
+  });
+
+  test('처리 중 목록의 마지막 호출은 1,000자에서 자른다(완료된 트랜잭션에는 전체)', async () => {
+    const res = get('/longslow');
+    const item = await waitFor(
+      () => store.active().find((a) => a.name === 'GET /longslow' && a.lastSpan), '처리 중 목록', 5000);
+    assert.equal(item.lastSpan.length, 1003);
+    assert.ok(item.lastSpan.endsWith('...'));
+    assert.equal(await res, 200);
+    const tx = await waitTx('GET /longslow');
+    assert.ok(tx.spans[0].text.length > 5000, String(tx.spans[0].text.length));
+  });
+
+  test('보낼 수 없을 만큼 쌓인 구간은 힙에 들고 있지 않는다', async () => {
+    assert.equal(await get('/heavy'), 200);
+    const tx = await waitTx('GET /heavy');
+    assert.equal(tx.spans.length + tx.droppedSpans, 1000);
+    assert.ok(tx.spans.length > 0 && tx.spans.length < 30, String(tx.spans.length));
   });
 
   test('HttpURLConnection 호출이 외부 구간으로 기록되고, 반복 호출·https 위임에도 호출당 하나다', async () => {
