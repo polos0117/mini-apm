@@ -39,18 +39,22 @@
   #alertbar[hidden] { display: none; }
   #alerts { margin: 0; padding: 0; list-style: none; flex: 1; min-width: 0; }
   #alerts li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #bar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  #bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 12px; }
+  #tabs { display: flex; gap: 4px; margin-right: 12px; }
+  #tabs a { color: var(--dim); text-decoration: none; font-weight: 600; padding: 4px 8px; border-bottom: 2px solid transparent; }
+  #tabs a.on { color: var(--text); border-bottom-color: var(--ok); }
+  body[data-tab=live] [data-tab=stats], body[data-tab=stats] [data-tab=live] { display: none !important; } /* #main·#tiles의 display보다 앞서게 */
   #apps { display: flex; flex-wrap: wrap; gap: 6px; }
   button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; font: inherit; cursor: pointer; }
   button:disabled { cursor: default; color: var(--dim); }
   #apps button.on, #ranges button.on { border-color: var(--ok); color: var(--ok); }
   #ranges { font-weight: 400; margin-left: 8px; }
-  #routes { max-height: 360px; overflow: auto; }
+  #routes { max-height: 60vh; overflow: auto; }
   #routes table { table-layout: fixed; }
   #routes th { cursor: pointer; user-select: none; }
   #routes th:not(:first-child), #routes td:not(:first-child) { width: 92px; }
   #apps button.down::after { content: ' ●'; color: var(--err); }
-  #settings { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--dim); font-size: 13px; }
+  #settings { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--dim); font-size: 13px; }
   #settings input[type=number] { width: 56px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
   #legend { font-weight: 400; margin-left: 8px; }
   #errlist { max-height: 240px; overflow: auto; }
@@ -60,9 +64,10 @@
   #errlist td:nth-child(3) { width: 40%; }
 </style>
 </head>
-<body>
+<body data-tab="live">
   <div id="alertbar" hidden><ul id="alerts"></ul><button id="ack">확인</button></div>
   <div id="bar">
+    <nav id="tabs"><a href="#live">실시간</a><a href="#stats">API별 통계</a></nav>
     <div id="apps"></div>
     <div id="settings">
       <label><input type="checkbox" id="optErrors"> 에러 경보</label>
@@ -71,18 +76,18 @@
       <button id="notify" hidden>알림 켜기</button>
     </div>
   </div>
-  <div id="tiles">
+  <div id="tiles" data-tab="live">
     <div class="panel tile"><h2>초당 처리량(TPS)</h2><b id="tps">-</b></div>
     <div class="panel tile"><h2>평균 응답(ms)</h2><b id="avg">-</b></div>
     <div class="panel tile"><h2>응답 95%(p95, ms)</h2><b id="p95">-</b></div>
     <div class="panel tile"><h2>에러</h2><b id="errors">-</b></div>
   </div>
-  <div id="main">
+  <div id="main" data-tab="live">
     <div class="panel"><h2>X-View — 영역을 끌어서 고르세요 <span id="legend"></span> <span id="status"></span></h2><canvas id="xview"></canvas></div>
     <div class="panel"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
   </div>
-  <section class="panel"><h2>최근 에러</h2><div id="errlist">없음</div></section>
-  <section class="panel"><h2>API별 통계 <span id="ranges"><button data-range="10m">최근 10분</button> <button data-range="all">서버 켠 뒤 전체</button></span></h2><div id="routes">없음</div></section>
+  <section class="panel" data-tab="live"><h2>최근 에러</h2><div id="errlist">없음</div></section>
+  <section class="panel" data-tab="stats"><h2>API별 통계 <span id="ranges"><button data-range="10m">최근 10분</button> <button data-range="all">서버 켠 뒤 전체</button></span></h2><div id="routes">없음</div></section>
   <section class="panel"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
   <section class="panel"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
   <script type="module" src="app.mjs"></script>

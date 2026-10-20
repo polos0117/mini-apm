@@ -239,6 +239,7 @@ function showErrors() {
 // ---- API별 통계 ----
 
 async function fetchRoutes() {
+  if (document.body.dataset.tab !== 'stats') return; // 통계 탭을 볼 때만 받는다
   try {
     const res = await fetch(`/routes?range=${routeRange}`);
     if (res.ok) routeData = await res.json();
@@ -297,8 +298,21 @@ for (const b of $('ranges').children) {
     fetchRoutes();
   };
 }
-fetchRoutes();
 setInterval(fetchRoutes, ROUTE_EVERY_MS);
+
+// ---- 메뉴 탭 ----
+
+// 주소 끝(#stats)으로 고르므로 새로고침·즐겨찾기에도 같은 탭이 열린다. 고른 트랜잭션·상세는 두 탭이 함께 쓴다.
+function showTab() {
+  const tab = location.hash === '#stats' ? 'stats' : 'live';
+  if (document.body.dataset.tab !== tab) $('picked').replaceChildren(); // 다른 탭에서 고른 목록이 남지 않게
+  document.body.dataset.tab = tab;
+  for (const a of $('tabs').children) a.classList.toggle('on', a.hash === `#${tab}`);
+  if (tab === 'stats') fetchRoutes();
+  else draw(); // 숨어 있던 X-View는 크기가 0이었다
+}
+addEventListener('hashchange', showTab);
+showTab();
 
 // ---- 경보 ----
 
