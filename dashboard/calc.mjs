@@ -48,3 +48,6 @@ export function routeSort(saved) {
   const [col, dir] = String(saved).split(':');
   return ROUTE_COLS.includes(col) ? { col, desc: dir !== 'asc' } : { col: 'total', desc: true };
 }
+
+// 느린 정도: 처리 중 목록·타일·표가 같은 기준(1초 노랑, 3초 빨강)을 쓴다
+export const slowLevel = (ms) => (ms >= 3000 ? 'err' : ms >= 1000 ? 'warn' : '');

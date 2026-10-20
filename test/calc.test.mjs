@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, nextSort, pickInRect, routeSort, selfTime, sortRoutes, yMax } from '../dashboard/calc.mjs';
+import { downSec, nextSort, pickInRect, routeSort, selfTime, slowLevel, sortRoutes, yMax } from '../dashboard/calc.mjs';
 
 test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
   const spans = [
@@ -63,4 +63,12 @@ test('routeSort: 기억해 둔 "열:방향"을 읽고, 모르는 값이면 총 �
   assert.deepEqual(routeSort('count:desc'), { col: 'count', desc: true });
   assert.deepEqual(routeSort('nope:asc'), { col: 'total', desc: true });
   assert.deepEqual(routeSort(''), { col: 'total', desc: true });
+});
+
+test('slowLevel: 1초 미만 빈 값, 1초 이상 warn, 3초 이상 err', () => {
+  assert.equal(slowLevel(0), '');
+  assert.equal(slowLevel(999), '');
+  assert.equal(slowLevel(1000), 'warn');
+  assert.equal(slowLevel(2999), 'warn');
+  assert.equal(slowLevel(3000), 'err');
 });

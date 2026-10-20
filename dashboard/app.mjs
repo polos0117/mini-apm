@@ -1,5 +1,5 @@
 import { createAlerts } from './alerts.mjs';
-import { downSec, nextSort, pickInRect, ROUTE_COLS, routeSort, selfTime, sortRoutes, yMax } from './calc.mjs';
+import { downSec, nextSort, pickInRect, ROUTE_COLS, routeSort, selfTime, slowLevel, sortRoutes, yMax } from './calc.mjs';
 
 const WINDOW_MS = 5 * 60 * 1000;            // X-View에 보이는 시간
 const PAD = { l: 52, r: 24, t: 8, b: 22 };   // 축 글자 자리
@@ -271,6 +271,7 @@ function showRoutes() {
     tr.children[0].className = 'text';
     for (const td of [...tr.children].slice(1)) td.className = 'num';
     if (r.errors > 0) tr.children[2].className = 'num err';
+    for (const [i, ms] of [[3, r.avg], [4, r.p95], [5, r.max]]) tr.children[i].className = `num ${slowLevel(ms)}`;
     tr.onclick = () => pickRoute(r);
     table.append(tr);
   }
@@ -395,6 +396,8 @@ function row(tag, cells) {
 
 function showStats(s) {
   for (const key of ['tps', 'avg', 'p95', 'errors']) $(key).textContent = s[key];
+  for (const key of ['avg', 'p95']) $(key).className = slowLevel(s[key]) || 'good';
+  $('errors').className = s.errors > 0 ? 'err' : 'good';
 }
 
 function showActive(list) {
@@ -402,7 +405,7 @@ function showActive(list) {
   const table = document.createElement('table');
   // 좁은 패널이라 ① 이름·시간 ② 현재 위치 ③ 마지막 호출을 각각 한 줄로. 넘치면 …로 자르고 전체는 툴팁으로.
   for (const a of list) {
-    const level = a.elapsed >= 3000 ? 'err' : a.elapsed >= 1000 ? 'warn' : '';
+    const level = slowLevel(a.elapsed);
     const tr = row('td', [tag(a.agent) + a.name, `${(a.elapsed / 1000).toFixed(1)}초`]);
     tr.className = level;
     tr.children[0].className = 'ell';
@@ -428,7 +431,7 @@ function showPicked(list) {
   for (const p of list.slice(0, MAX_ROWS)) {
     const tr = row('td', [new Date(p.t).toLocaleTimeString(), tag(p.agent) + p.name, Math.round(p.elapsed), p.error ? '에러' : '정상']);
     tr.className = p.error ? 'row err' : 'row';
-    tr.children[2].className = 'num';
+    tr.children[2].className = `num ${slowLevel(p.elapsed)}`;
     tr.onclick = () => showDetail(p.id);
     table.append(tr);
   }
@@ -460,16 +463,25 @@ async function showDetail(id) {
   for (const s of tx.spans) {
     const label = s.error ? `${s.text}  (${s.error})` : s.text;
     table.append(spanRow(KIND[s.type] ?? s.type, label, s.offset / total, s.elapsed, s.elapsed / total, s.error,
-      s.depth ?? 0, s.type === 'method' || s.type === 'mapper'));
+      s.depth ?? 0, s.type));
   }
   if (tx.droppedSpans) table.append(row('td', ['…', `호출 ${tx.droppedSpans}개 생략(트랜잭션당 1000개까지 기록, 생략분 시간은 아래에 포함)`]));
-  table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null, 0, false));
-  box.replaceChildren(...(info ? [head, req, table] : [head, table]));
+  table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null, 0, 'self'));
+  const legend = document.createElement('p');
+  legend.className = 'req';
+  legend.append(...Object.entries(KIND).map(([t, name]) => {
+    const k = document.createElement('span');
+    k.className = `k-${t}`;
+    k.textContent = `■ ${name}   `;
+    return k;
+  }));
+  box.replaceChildren(...(info ? [head, req, legend, table] : [head, legend, table]));
 }
 
-// left·width는 전체 대비 비율(0~1). left가 null이면 막대 없이 시간만. depth만큼 들여쓰고, dim이면 막대를 흐리게(메서드·매퍼).
-function spanRow(kind, text, left, elapsed, width, error, depth, dim) {
+// left·width는 전체 대비 비율(0~1). left가 null이면 막대 없이 시간만. depth만큼 들여쓰고, 종류(type)마다 색이 다르다.
+function spanRow(kind, text, left, elapsed, width, error, depth, type) {
   const tr = row('td', [kind, text]);
+  tr.children[0].className = `k-${type}`;
   tr.children[1].className = 'text';
   tr.children[1].style.paddingLeft = `${8 + depth * 16}px`;
   if (error) tr.className = 'err';
@@ -480,7 +492,7 @@ function spanRow(kind, text, left, elapsed, width, error, depth, dim) {
     const fill = document.createElement('i');
     fill.style.left = `${left * 100}%`;
     fill.style.width = `${Math.max(0.5, width * 100)}%`;
-    fill.className = error ? 'err' : dim ? 'dim' : '';
+    fill.className = error ? 'err' : `k-${type}`;
     bar.append(fill);
   }
   barCell.append(bar);
