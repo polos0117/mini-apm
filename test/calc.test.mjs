@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, nextSort, pickInRect, routeSort, selfTime, slowLevel, sortRoutes, yMax } from '../dashboard/calc.mjs';
+import { downSec, nextSort, nextPickSort, pickSort, pickInRect, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, yMax } from '../dashboard/calc.mjs';
 
 test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
   const spans = [
@@ -71,4 +71,29 @@ test('slowLevel: 1초 미만 빈 값, 1초 이상 warn, 3초 이상 err', () => 
   assert.equal(slowLevel(1000), 'warn');
   assert.equal(slowLevel(2999), 'warn');
   assert.equal(slowLevel(3000), 'err');
+});
+
+test('sortPicked: 열마다 정렬, 같으면 응답시간 긴 순, 원본은 그대로', () => {
+  const list = [
+    { id: 'a', t: 1, name: '나', elapsed: 100, error: null },
+    { id: 'b', t: 3, name: '가', elapsed: 300, error: 'x' },
+    { id: 'c', t: 2, name: '나', elapsed: 200, error: null },
+  ];
+  const ids = (sort) => sortPicked(list, sort).map((p) => p.id).join('');
+  assert.equal(ids({ col: 'elapsed', desc: true }), 'bca');
+  assert.equal(ids({ col: 'elapsed', desc: false }), 'acb');
+  assert.equal(ids({ col: 't', desc: true }), 'bca');
+  assert.equal(ids({ col: 'name', desc: false }), 'bca'); // 가 < 나, 나끼리는 응답시간 긴 순
+  assert.equal(ids({ col: 'error', desc: true }), 'bca'); // 에러 먼저
+  assert.equal(list.map((p) => p.id).join(''), 'abc');
+});
+
+test('nextPickSort·pickSort: 이름만 처음 가나다순, 모르는 값이면 응답시간 긴 순', () => {
+  assert.deepEqual(nextPickSort({ col: 'elapsed', desc: true }, 'elapsed'), { col: 'elapsed', desc: false });
+  assert.deepEqual(nextPickSort({ col: 'elapsed', desc: true }, 'name'), { col: 'name', desc: false });
+  assert.deepEqual(nextPickSort({ col: 'elapsed', desc: true }, 't'), { col: 't', desc: true });
+  assert.deepEqual(nextPickSort({ col: 'elapsed', desc: true }, 'error'), { col: 'error', desc: true });
+  assert.deepEqual(pickSort('t:asc'), { col: 't', desc: false });
+  assert.deepEqual(pickSort('zzz'), { col: 'elapsed', desc: true });
+  assert.deepEqual(pickSort(null), { col: 'elapsed', desc: true });
 });

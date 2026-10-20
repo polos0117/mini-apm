@@ -51,3 +51,29 @@ export function routeSort(saved) {
 
 // 느린 정도: 처리 중 목록·타일·표가 같은 기준(1초 노랑, 3초 빨강)을 쓴다
 export const slowLevel = (ms) => (ms >= 3000 ? 'err' : ms >= 1000 ? 'warn' : '');
+
+// 고른 트랜잭션의 열(표 왼쪽부터): 끝난 시각, 이름, 응답시간, 상태(에러 여부)
+export const PICK_COLS = ['t', 'name', 'elapsed', 'error'];
+const PICK_CMP = {
+  t: (a, b) => a.t - b.t,
+  name: (a, b) => a.name.localeCompare(b.name, 'ko'),
+  elapsed: (a, b) => a.elapsed - b.elapsed,
+  error: (a, b) => Boolean(a.error) - Boolean(b.error),
+};
+
+// sort = { col, desc }. 같은 값이면 응답시간 긴 순
+export function sortPicked(list, sort) {
+  const dir = sort.desc ? -1 : 1;
+  return [...list].sort((a, b) => dir * PICK_CMP[sort.col](a, b) || b.elapsed - a.elapsed);
+}
+
+// 같은 열이면 방향을 뒤집고, 새 열은 이름만 가나다순·나머지는 큰 순(최근·긴·에러 먼저)
+export function nextPickSort(sort, col) {
+  return sort.col === col ? { col, desc: !sort.desc } : { col, desc: col !== 'name' };
+}
+
+// localStorage의 "열:방향". 모르는 열이면 응답시간 긴 순
+export function pickSort(saved) {
+  const [col, dir] = String(saved).split(':');
+  return PICK_COLS.includes(col) ? { col, desc: dir !== 'asc' } : { col: 'elapsed', desc: true };
+}

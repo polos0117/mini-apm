@@ -1,5 +1,7 @@
 import { createAlerts } from './alerts.mjs';
-import { downSec, nextSort, pickInRect, ROUTE_COLS, routeSort, selfTime, slowLevel, sortRoutes, yMax } from './calc.mjs';
+import {
+  downSec, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, ROUTE_COLS, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, yMax,
+} from './calc.mjs';
 
 const WINDOW_MS = 5 * 60 * 1000;            // X-View에 보이는 시간
 const PAD = { l: 52, r: 24, t: 8, b: 22 };   // 축 글자 자리
@@ -8,6 +10,7 @@ const MAX_ERRORS = 50;                       // 최근 에러 패널 줄 수
 const MAX_BANNER = 5;                        // 빨간 줄에 보이는 경보 수
 const MAX_ROUTE_ROWS = 50;                   // API별 통계 줄 수
 const ROUTE_EVERY_MS = 5000;                 // API별 통계 갱신 간격
+const PICK_HEAD = { t: '끝난 시각', name: '이름', elapsed: '응답시간(ms)', error: '상태' };
 const ROUTE_HEAD = { key: 'API', count: '횟수', errors: '에러', avg: '평균(ms)', p95: 'p95(ms)', max: '최대(ms)', total: '총 시간(s)' };
 const SHAPES = ['●', '▲', '■', '◆'];         // 앱마다 점 모양(agents 순서로 반복)
 const ZERO = { tps: 0, avg: 0, p95: 0, errors: 0 };
@@ -52,6 +55,8 @@ const opts = {
 const alerts = createAlerts();
 let routeRange = load('apm.routeRange', '10m') === 'all' ? 'all' : '10m';
 let routeOrder = routeSort(load('apm.routeSort', ''));
+let pickOrder = pickSort(load('apm.pickSort', ''));
+let pickedList = []; // 고른 트랜잭션 전체(정렬을 바꾸면 다시 그린다)
 let routeData = null; // 마지막으로 받은 /routes. 받기에 실패하면 이전 것을 그대로 보인다
 
 const visible = (p) => !selected || p.agent === selected;
@@ -426,9 +431,18 @@ function showActive(list) {
 }
 
 function showPicked(list) {
+  pickedList = list;
   const table = $('picked');
-  table.replaceChildren(row('th', ['끝난 시각', '이름', '응답시간(ms)', '상태']));
-  for (const p of list.slice(0, MAX_ROWS)) {
+  const head = row('th', PICK_COLS.map((c) => PICK_HEAD[c] + (c === pickOrder.col ? (pickOrder.desc ? ' ▼' : ' ▲') : '')));
+  PICK_COLS.forEach((c, i) => {
+    head.children[i].onclick = () => {
+      pickOrder = nextPickSort(pickOrder, c);
+      save('apm.pickSort', `${pickOrder.col}:${pickOrder.desc ? 'desc' : 'asc'}`);
+      showPicked(pickedList);
+    };
+  });
+  table.replaceChildren(head);
+  for (const p of sortPicked(list, pickOrder).slice(0, MAX_ROWS)) {
     const tr = row('td', [new Date(p.t).toLocaleTimeString(), tag(p.agent) + p.name, Math.round(p.elapsed), p.error ? '에러' : '정상']);
     tr.className = p.error ? 'row err' : 'row';
     tr.children[2].className = `num ${slowLevel(p.elapsed)}`;
