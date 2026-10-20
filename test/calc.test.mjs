@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pickInRect, yMax } from '../dashboard/calc.mjs';
+import { downSec, pickInRect, yMax } from '../dashboard/calc.mjs';
+
+test('downSec: 1~600 정수만, 그 밖이면 10', () => {
+  assert.equal(downSec('30'), 30);
+  assert.equal(downSec(1), 1);
+  assert.equal(downSec('600'), 600);
+  for (const v of ['', 'abc', '0', '601', '2.5', null, undefined]) assert.equal(downSec(v), 10);
+});
 
 test('pickInRect: 범위 안 점만, 응답시간 긴 순, 거꾸로 끈 사각형도 같다', () => {
   const pts = [

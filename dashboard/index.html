@@ -33,9 +33,37 @@
   .bar i { position: absolute; top: 0; bottom: 0; background: var(--ok); }
   .bar i.err { background: var(--err); }
   #status { font-weight: 400; }
+  #alertbar { display: flex; gap: 12px; align-items: flex-start; background: #3a1418; border: 1px solid var(--err); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+  #alertbar[hidden] { display: none; }
+  #alerts { margin: 0; padding: 0; list-style: none; flex: 1; min-width: 0; }
+  #alerts li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #bar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  #apps { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  button:disabled { cursor: default; color: var(--dim); }
+  #apps button.on { border-color: var(--ok); color: var(--ok); }
+  #apps button.down::after { content: ' ●'; color: var(--err); }
+  #settings { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--dim); font-size: 13px; }
+  #settings input[type=number] { width: 56px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
+  #legend { font-weight: 400; margin-left: 8px; }
+  #errlist { max-height: 240px; overflow: auto; }
+  #errlist table { table-layout: fixed; }
+  #errlist td:nth-child(1) { width: 90px; }
+  #errlist td:nth-child(2) { width: 110px; }
+  #errlist td:nth-child(3) { width: 40%; }
 </style>
 </head>
 <body>
+  <div id="alertbar" hidden><ul id="alerts"></ul><button id="ack">확인</button></div>
+  <div id="bar">
+    <div id="apps"></div>
+    <div id="settings">
+      <label><input type="checkbox" id="optErrors"> 에러 경보</label>
+      <label><input type="checkbox" id="optDown"> 끊김 경보</label>
+      <label>끊김 기준 <input type="number" id="optDownSec" min="1" max="600"> 초</label>
+      <button id="notify" hidden>알림 켜기</button>
+    </div>
+  </div>
   <div id="tiles">
     <div class="panel tile"><h2>초당 처리량(TPS)</h2><b id="tps">-</b></div>
     <div class="panel tile"><h2>평균 응답(ms)</h2><b id="avg">-</b></div>
@@ -43,9 +71,10 @@
     <div class="panel tile"><h2>에러</h2><b id="errors">-</b></div>
   </div>
   <div id="main">
-    <div class="panel"><h2>X-View — 영역을 끌어서 고르세요 <span id="status"></span></h2><canvas id="xview"></canvas></div>
+    <div class="panel"><h2>X-View — 영역을 끌어서 고르세요 <span id="legend"></span> <span id="status"></span></h2><canvas id="xview"></canvas></div>
     <div class="panel"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
   </div>
+  <section class="panel"><h2>최근 에러</h2><div id="errlist">없음</div></section>
   <section class="panel"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
   <section class="panel"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
   <script type="module" src="app.mjs"></script>

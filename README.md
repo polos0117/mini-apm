@@ -17,6 +17,8 @@ Git Bash에서는 `fnm exec --using=22 node demo.js`, `fnm exec --using=22 npm.c
 
 브라우저에서 http://localhost:7700 을 연다. 끝내려면 Ctrl+C.
 
+경보(에러 난 요청, 앱 끊김)는 대시보드 탭이 열려 있을 때만 울린다. 다른 창을 보고 있을 때 Windows 알림을 받으려면 맨 위 [알림 켜기]를 한 번 누른다.
+
 | 포트 | 프로세스 |
 |---|---|
 | 7700 | 수집 서버 + 대시보드 |
@@ -34,6 +36,7 @@ Git Bash에서는 `fnm exec --using=22 node demo.js`, `fnm exec --using=22 npm.c
 | X-View 산점도 + 드래그 | X-View | 평균이 숨기는 느린 요청을 점 하나하나로 보는 법 |
 | p95 | 응답시간 백분위 | 평균과 p95가 갈라지는 순간이 문제의 신호 |
 | 에이전트의 `try/catch`, 버퍼 상한 | 에이전트 안정성 | 모니터링 도구가 앱을 망가뜨리면 안 된다 |
+| 앱 버튼 + 최근 에러 + 경보(`dashboard/alerts.mjs`) | 도메인/인스턴스 선택, 이벤트·경보 | 경보는 '처음 본 순간'만 알리고 반복은 묶어야 쓸 만하다 |
 
 ## 샘플 앱의 일부러 넣은 증상
 
@@ -61,7 +64,7 @@ node collector/server.js  # 수집 서버만 따로 띄울 때
 
 Eclipse 실행 설정(Run Configurations → 해당 Application)에 두 가지를 넣는다.
 - **Arguments → VM arguments**: `-javaagent:C:/Users/jjshs/mini-apm/agent-java/dist/mini-apm-agent.jar`
-- **Environment**: `APM_AGENT=ipfinance` (보내는 쪽 이름. 대시보드에는 아직 표시하지 않는다)
+- **Environment**: `APM_AGENT=ipfinance` (보내는 쪽 이름. 대시보드 맨 위 앱 버튼에 이 이름이 나온다. EVL은 `evl`)
 - **Environment(선택)**: `APM_APP_PACKAGE=org.kipa.ipfinance.` — 처리 중 목록의 "현재 위치"에서 앱 메서드를 고를 때 쓰는 클래스 이름 접두어. 없으면 main 클래스의 패키지를 쓰고, WTP 외부 Tomcat처럼 main이 Tomcat이면 맨 위 프레임만 보인다.
 
 앱 콘솔에 `[apm] mini-apm agent → ... (ipfinance, 앱 패키지 org.kipa.ipfinance.)` 한 줄이 보이면 붙은 것이다.
