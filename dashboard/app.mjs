@@ -474,6 +474,7 @@ function resetCompare() {
 // 고른 점과 X-View에 보이는 나머지(같은 앱)를 수집 서버가 비교한다
 async function fetchCompare(list) {
   const seq = ++compareSeq;
+  $('cmpinfo').textContent = ''; // 이전 선택의 건수가 남지 않게
   $('compare').replaceChildren('비교하는 중…');
   let res;
   try {
