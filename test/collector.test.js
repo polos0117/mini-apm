@@ -16,7 +16,7 @@ test('ingest 후 /tx/:id로 상세를 얻는다', async (t) => {
   const base = await start(t);
   const tx = sample();
   assert.equal((await post(base, JSON.stringify({ agent: 'x', txs: [tx], active: [] }))).status, 204);
-  assert.deepEqual(await (await fetch(`${base}/tx/abc`)).json(), tx);
+  assert.deepEqual(await (await fetch(`${base}/tx/abc`)).json(), { ...tx, agent: 'x' });
   assert.equal((await fetch(`${base}/tx/nope`)).status, 404);
 });
 
@@ -49,6 +49,9 @@ test('stream은 연결 즉시 최근 점을, 이후 1초마다 새 점을 보낸
   const first = await next();
   assert.deepEqual(first.points.map((p) => p.id), ['abc']);
   assert.deepEqual(Object.keys(first.stats).sort(), ['avg', 'errors', 'p95', 'tps']);
+  assert.equal(first.points[0].agent, 'x');
+  assert.deepEqual(first.agents.map((a) => a.name), ['x']);
+  assert.deepEqual(Object.keys(first.agentStats), ['x']);
 
   // 그 뒤 1초 틱마다 새로 받은 점만 온다(같은 점이 두 번 오지 않는다)
   await post(base, JSON.stringify({ agent: 'x', txs: [{ ...sample(), id: 'def' }], active: [] }));

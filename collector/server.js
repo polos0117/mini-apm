@@ -27,6 +27,12 @@ function createCollector(store = createStore()) {
   const clients = new Set();
   let pending = []; // 다음 틱에 보낼 새 점
 
+  // 스트림 한 번에 보내는 것: 새 점 + 마감된 1초 통계(전체·앱별) + 앱 목록 + 처리 중
+  const snapshot = (points, now) => {
+    const sec = statSec(now);
+    return sse({ points, stats: store.stats(sec), agentStats: store.agentStats(sec), agents: store.agents(now), active: store.active(now) });
+  };
+
   function ingest(req, res) {
     const chunks = [];
     let size = 0;
@@ -54,7 +60,7 @@ function createCollector(store = createStore()) {
     // 아직 틱으로 안 나간 점(pending)은 다음 틱에 오므로 과거 점에서 뺀다
     const queued = new Set(pending.map((p) => p.id));
     const backlog = store.points(now - BACKLOG_MS).filter((p) => !queued.has(p.id));
-    res.write(sse({ points: backlog, stats: store.stats(statSec(now)), active: store.active(now) }));
+    res.write(snapshot(backlog, now));
     clients.add(res);
     res.on('close', () => clients.delete(res)); // req의 close는 요청 본문이 끝나면 바로 오므로 res로 본다
   }
@@ -86,7 +92,7 @@ function createCollector(store = createStore()) {
   const timer = setInterval(() => {
     const now = Date.now();
     store.prune(now);
-    const msg = sse({ points: pending, stats: store.stats(statSec(now)), active: store.active(now) });
+    const msg = snapshot(pending, now);
     pending = [];
     for (const res of clients) res.write(msg);
   }, 1000);
