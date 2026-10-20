@@ -10,6 +10,7 @@ const MAX_ROWS = 200;                        // ponytail: 목록은 200줄까지
 const MAX_ERRORS = 50;                       // 최근 에러 패널 줄 수
 const MAX_BANNER = 5;                        // 빨간 줄에 보이는 경보 수
 const MAX_ROUTE_ROWS = 50;                   // API별 통계 줄 수
+const COMPARE_HINT = 'X-View에서 영역을 끌어 고르면 나머지와 비교합니다.';
 const ROUTE_EVERY_MS = 5000;                 // API별 통계 갱신 간격
 const PICK_HEAD = { t: '끝난 시각', name: '이름', elapsed: '응답시간(ms)', error: '상태' };
 const ROUTE_HEAD = { key: 'API', count: '횟수', errors: '에러', avg: '평균(ms)', p95: 'p95(ms)', max: '최대(ms)', total: '총 시간(s)' };
@@ -25,6 +26,7 @@ let scale = null;         // 마지막으로 그린 축: 좌표 ↔ 값 변환
 let last = null;          // 마지막으로 받은 메시지(stats, agentStats, agents, active)
 let errKey = '';          // 최근 에러 패널에 그린 점 id들. 같으면 다시 만들지 않는다(클릭이 사라지지 않게)
 let recent = [];          // 빨간 줄에 보일 경보 문구(최근 MAX_BANNER개)
+let compareSeq = 0;      // 무엇이 다른가: 마지막 요청 번호(늦게 온 이전 응답은 버린다)
 let unacked = 0;          // 확인 안 한 경보 수
 
 const $ = (id) => document.getElementById(id);
@@ -187,7 +189,10 @@ canvas.addEventListener('pointerup', () => {
   const [x0, x1] = widen(drag.x0, drag.x1);
   const [y0, y1] = widen(drag.y0, drag.y1);
   drag = null;
-  showPicked(pickInRect([...points.values()].filter(visible), { t0: scale.t(x0), t1: scale.t(x1), e0: scale.ms(y0), e1: scale.ms(y1) }));
+  const list = pickInRect([...points.values()].filter(visible), { t0: scale.t(x0), t1: scale.t(x1), e0: scale.ms(y0), e1: scale.ms(y1) });
+  showPicked(list);
+  if (list.length) fetchCompare(list);
+  else resetCompare();
   draw();
 });
 
@@ -206,6 +211,7 @@ function showApps() {
         selected = n;
         save('apm.app', n);
         $('picked').replaceChildren();
+        resetCompare();
         render();
         fetchRoutes();
       };
@@ -287,6 +293,7 @@ function showRoutes() {
 
 // 그 API의 최근 10분 트랜잭션을 "고른 트랜잭션"에
 async function pickRoute(r) {
+  resetCompare();
   let list;
   try {
     const res = await fetch(`/routes/txs?agent=${encodeURIComponent(r.agent)}&key=${encodeURIComponent(r.key)}`);
@@ -312,7 +319,10 @@ setInterval(fetchRoutes, ROUTE_EVERY_MS);
 // 주소 끝(#stats)으로 고르므로 새로고침·즐겨찾기에도 같은 탭이 열린다. 고른 트랜잭션·상세는 두 탭이 함께 쓴다.
 function showTab() {
   const tab = location.hash === '#stats' ? 'stats' : 'live';
-  if (document.body.dataset.tab !== tab) $('picked').replaceChildren(); // 다른 탭에서 고른 목록이 남지 않게
+  if (document.body.dataset.tab !== tab) {
+    $('picked').replaceChildren(); // 다른 탭에서 고른 목록이 남지 않게
+    resetCompare();
+  }
   document.body.dataset.tab = tab;
   for (const a of $('tabs').children) a.classList.toggle('on', a.hash === `#${tab}`);
   if (tab === 'stats') fetchRoutes();
@@ -451,6 +461,62 @@ function showPicked(list) {
     table.append(tr);
   }
   if (list.length > MAX_ROWS) table.append(row('td', [`… 외 ${list.length - MAX_ROWS}건`]));
+}
+
+// ---- 무엇이 다른가 ----
+
+function resetCompare() {
+  compareSeq++;
+  $('cmpinfo').textContent = '';
+  $('compare').replaceChildren(COMPARE_HINT);
+}
+
+// 고른 점과 X-View에 보이는 나머지(같은 앱)를 수집 서버가 비교한다
+async function fetchCompare(list) {
+  const seq = ++compareSeq;
+  $('compare').replaceChildren('비교하는 중…');
+  let res;
+  try {
+    const r = await fetch('/compare', {
+      method: 'POST', body: JSON.stringify({ ids: list.map((p) => p.id), since: Date.now() - WINDOW_MS, agent: selected }),
+    });
+    if (!r.ok) throw new Error(String(r.status));
+    res = await r.json();
+  } catch {
+    if (seq === compareSeq) $('compare').replaceChildren('비교하지 못했습니다(수집 서버 연결 확인).');
+    return;
+  }
+  if (seq === compareSeq) showCompare(res);
+}
+
+function showCompare(res) {
+  $('cmpinfo').textContent = `고른 ${res.picked}건 vs 나머지 ${res.rest}건`;
+  if (res.picked === 0 || res.rest === 0) return $('compare').replaceChildren('비교할 나머지 요청이 없습니다.');
+  if (res.rows.length === 0) return $('compare').replaceChildren('뚜렷한 차이가 없습니다.');
+  const table = document.createElement('table');
+  table.append(row('th', ['속성', '값', '고른 쪽', '나머지']));
+  for (const r of res.rows) {
+    const tr = row('td', [r.attr, r.value]);
+    tr.children[1].className = 'text';
+    tr.append(pctCell(r.pickedPct, r.picked, ''), pctCell(r.restPct, r.rest, 'rest'));
+    table.append(tr);
+  }
+  $('compare').replaceChildren(table);
+}
+
+// 0~100% 막대 + "85% (17건)"
+function pctCell(pct, n, cls) {
+  const td = document.createElement('td');
+  const box = document.createElement('div');
+  box.className = `pct ${cls}`;
+  const track = document.createElement('span');
+  track.className = 'track';
+  const fill = document.createElement('i');
+  fill.style.width = `${pct}%`;
+  track.append(fill);
+  box.append(track, `${pct}% (${n}건)`);
+  td.append(box);
+  return td;
 }
 
 // ---- 상세 ----
