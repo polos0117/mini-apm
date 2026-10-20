@@ -3,6 +3,7 @@ package apm;
 import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
 import static net.bytebuddy.matcher.ElementMatchers.isConstructor;
+import static net.bytebuddy.matcher.ElementMatchers.isDeclaredBy;
 import static net.bytebuddy.matcher.ElementMatchers.isGetter;
 import static net.bytebuddy.matcher.ElementMatchers.isInterface;
 import static net.bytebuddy.matcher.ElementMatchers.isPublic;
@@ -87,14 +88,16 @@ public final class Agent {
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(MapperAdvice.class).on(not(isAbstract()).and(
                 named("query").and(takesArguments(4)).or(named("update").and(takesArguments(2)))))));
-    // 앱 메서드 흐름: 앱 패키지의 *Controller·*ServiceImpl·*Service. $가 든 이름(CGLIB 프록시, 안쪽 클래스)은 빼서 한 호출이 한 줄
+    // 앱 메서드 흐름: 앱 패키지의 *Controller·*ServiceImpl·*Service. $가 든 이름(CGLIB 프록시, 안쪽 클래스)은 빼서 한 호출이 한 줄.
+    // getter·setter는 서비스에서만 뺀다. 컨트롤러의 getXxx()는 @GetMapping 요청 처리 메서드일 수 있다.
     if (Tracer.appPackage != null) {
       main = main.type(nameStartsWith(Tracer.appPackage)
               .and(nameEndsWith("Controller").or(nameEndsWith("ServiceImpl")).or(nameEndsWith("Service")))
               .and(not(nameContains("$"))).and(not(isInterface())))
           .transform((builder, type, loader, module) ->
               builder.visit(Advice.to(MethodAdvice.class).on(isPublic().and(not(isStatic())).and(not(isAbstract()))
-                  .and(not(isConstructor())).and(not(isGetter())).and(not(isSetter())).and(not(isSynthetic()))
+                  .and(not(isConstructor())).and(not(isSynthetic()))
+                  .and(not(isGetter().or(isSetter())).or(isDeclaredBy(nameEndsWith("Controller"))))
                   .and(not(namedOneOf("toString", "equals", "hashCode"))))));
     }
     main.installOn(inst);

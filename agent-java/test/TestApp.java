@@ -145,6 +145,18 @@ public class TestApp {
             case "/flow":
               orders.save(1);
               break;
+            case "/getitem":
+              orders.getItem();
+              break;
+            case "/floodlog": // 구간 한도(1000)를 채운 뒤 남긴 예외도 요청 에러가 되어야 한다
+              try (PreparedStatement p = db.prepareStatement("select name from item where id = ?")) {
+                for (int i = 0; i < 1001; i++) {
+                  p.setInt(1, i);
+                  p.executeQuery().close();
+                }
+              }
+              log.error("처리 실패", new IllegalStateException("한도 뒤"));
+              break;
             case "/flowfail":
               orders.saveFail();
               break;
@@ -251,6 +263,10 @@ class TestAppOrderController {
 
   public String save(int id) {
     return service.saveOrder(id);
+  }
+
+  public String getItem() { // @GetMapping getAcnutList()처럼 getter 모양의 요청 처리 메서드: 컨트롤러에서는 줄이 있어야 한다
+    return service.saveOrder(1);
   }
 
   public String saveFail() {

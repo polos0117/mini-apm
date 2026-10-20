@@ -23,7 +23,8 @@ MyBatis 3.5.6, Spring Security 5.4.5, 세션 속성 `loginUser`(`LoginUser`).
 - 대상 클래스: 이름이 앱 패키지(`Tracer.appPackage`)로 시작하고 `Controller`·`ServiceImpl`·`Service`로 끝나며,
   `$`를 포함하지 않고(Spring CGLIB 프록시 `$$…`, 안쪽 클래스 `$1`), 인터페이스가 아닌 클래스.
   앱 패키지가 `null`이면 메서드 구간을 계측하지 않는다.
-- 대상 메서드: public, static 아님, 생성자 아님, getter·setter 아님, synthetic 아님, `toString`·`equals`·`hashCode` 아님, abstract 아님.
+- 대상 메서드: public, static 아님, 생성자 아님, synthetic 아님, `toString`·`equals`·`hashCode` 아님, abstract 아님.
+  getter·setter는 서비스 클래스에서만 뺀다(최종 검토 후 변경: 컨트롤러의 `getAcnutList()`처럼 `@GetMapping` 요청 처리 메서드가 getter 모양일 수 있다).
 - `text` = `단순클래스명.메서드명`(예: `EvlServiceImpl.saveEvl`).
 - 메서드가 예외를 던지며 끝나면 그 구간 `error` = `단순클래스명: 메시지`(메시지 null이면 이름만). 요청 에러 판단에는 쓰지 않는다
   (요청 에러는 예외 스펙의 규칙대로: 예외 로그 → 500 → 없음).

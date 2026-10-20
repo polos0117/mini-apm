@@ -188,6 +188,22 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.ok(ctrl.elapsed >= svc.elapsed && svc.elapsed >= mapper.elapsed && mapper.elapsed >= sql.elapsed);
   });
 
+  test('컨트롤러의 getter 모양 요청 처리 메서드는 줄이 있다', async () => {
+    assert.equal(await get('/getitem'), 200);
+    const tx = await waitTx('GET /getitem');
+    assert.deepEqual(flow(tx).slice(0, 2), [
+      ['method', 'TestAppOrderController.getItem', 0],
+      ['method', 'TestAppOrderServiceImpl.saveOrder', 1],
+    ]);
+  });
+
+  test('구간 한도를 채운 뒤 남긴 예외도 요청 에러다', async () => {
+    assert.equal(await get('/floodlog'), 200);
+    const tx = await waitTx('GET /floodlog');
+    assert.ok(tx.droppedSpans > 0, String(tx.droppedSpans));
+    assert.equal(tx.error, 'IllegalStateException: 한도 뒤');
+  });
+
   test('메서드가 던진 예외는 그 줄에 남고, 잡혔으면 요청은 에러가 아니다', async () => {
     assert.equal(await get('/flowfail'), 200);
     const tx = await waitTx('GET /flowfail');

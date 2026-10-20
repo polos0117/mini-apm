@@ -65,6 +65,7 @@ public final class Tracer {
     int chars; // 담은 구간 글자 수. MAX_BODY를 넘으면 어차피 못 보내므로 더 담지 않는다(앱 힙 보호)
     int level; // 지금 열린 메서드·매퍼 구간 수
     String ip, user, referer, params; // 요청 정보(RequestInfo가 끝날 때 채운다)
+    String firstError; // 앱이 남긴 첫 예외. 구간 한도로 예외 구간을 못 남겨도 요청 에러는 이것으로 정한다
     double elapsed;
     int status;
     String error;
@@ -121,13 +122,8 @@ public final class Tracer {
     OPEN.remove(tx.id);
     tx.elapsed = ms(System.nanoTime() - tx.t0);
     tx.status = status;
+    tx.error = tx.firstError; // 앱이 남긴 첫 예외가 원인에 가깝다
     synchronized (tx.spans) {
-      for (Span s : tx.spans) {
-        if ("exception".equals(s.type)) { // 앱이 남긴 첫 예외가 원인에 가깝다
-          tx.error = s.error;
-          break;
-        }
-      }
       if (tx.error == null && status >= 500) {
         tx.error = "HTTP " + status;
         for (Span s : tx.spans) { // 마지막으로 실패한 SQL·외부 구간
@@ -188,7 +184,9 @@ public final class Tracer {
   public static void exception(String text, String error) {
     try {
       Tx tx = CURRENT.get();
-      if (tx == null || full(tx)) return;
+      if (tx == null) return;
+      if (tx.firstError == null) tx.firstError = cut(error);
+      if (full(tx)) return;
       open(tx, "exception", cut(text)).error = cut(error);
     } catch (Throwable ignored) {
       // 앱으로 새지 않게
