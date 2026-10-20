@@ -73,15 +73,23 @@ function createCollector(store = createStore()) {
   }
 
   const server = http.createServer((req, res) => {
-    let pathname;
+    let pathname, query;
     try {
-      ({ pathname } = new URL(req.url, 'http://x'));
+      ({ pathname, searchParams: query } = new URL(req.url, 'http://x'));
     } catch {
       return send(res, 400, 'bad url'); // 예: GET //
     }
     if (req.method === 'POST' && pathname === '/ingest') return ingest(req, res);
     if (req.method !== 'GET') return send(res, 404, 'not found');
     if (pathname === '/stream') return stream(req, res);
+    if (pathname === '/routes') {
+      const range = query.get('range') === 'all' ? 'all' : '10m';
+      return json(res, 200, { range, rows: store.routes(range) });
+    }
+    if (pathname === '/routes/txs') {
+      const agent = query.get('agent'), key = query.get('key');
+      return json(res, 200, agent && key ? store.routeTxs(agent, key) : []);
+    }
     if (pathname.startsWith('/tx/')) {
       const tx = store.get(pathname.slice(4));
       return tx ? json(res, 200, tx) : send(res, 404, 'not found');

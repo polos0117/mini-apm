@@ -96,3 +96,22 @@ test('수집 서버는 이 PC(127.0.0.1)에서만 접속을 받는다', async (t
   assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200);
   await assert.rejects(fetch(`http://${lan.address}:${port}/`));
 });
+
+test('/routes는 최근 10분(기본)·전체를, /routes/txs는 그 API 트랜잭션을 느린 순으로', async (t) => {
+  const base = await start(t);
+  const key = 'GET /qna/{code}/list';
+  const txs = [
+    { ...sample(), id: 'r1', name: 'GET /qna/A/list', route: key, elapsed: 5 },
+    { ...sample(), id: 'r2', name: 'GET /qna/B/list', route: key, elapsed: 9 },
+  ];
+  await post(base, JSON.stringify({ agent: 'x', txs, active: [] }));
+  const ten = await (await fetch(`${base}/routes`)).json();
+  assert.equal(ten.range, '10m');
+  assert.deepEqual(ten.rows.map((r) => [r.agent, r.key, r.count]), [['x', key, 2]]);
+  const all = await (await fetch(`${base}/routes?range=all`)).json();
+  assert.equal(all.range, 'all');
+  assert.equal(all.rows[0].count, 2);
+  const q = `agent=x&key=${encodeURIComponent(key)}`;
+  assert.deepEqual((await (await fetch(`${base}/routes/txs?${q}`)).json()).map((p) => p.id), ['r2', 'r1']);
+  assert.deepEqual(await (await fetch(`${base}/routes/txs?agent=x`)).json(), []);
+});
