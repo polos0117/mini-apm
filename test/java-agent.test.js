@@ -19,6 +19,10 @@ const APP_CP = [
   repoJar('jakarta.annotation', 'jakarta.annotation-api', '1.3.5'), // 로컬 저장소에 tomcat-annotations-api는 pom뿐이다
   repoJar('com.squareup.okhttp3', 'okhttp', '3.14.9'),
   repoJar('com.squareup.okio', 'okio', '1.17.2'),
+  repoJar('ch.qos.logback', 'logback-classic', '1.2.3'),
+  repoJar('ch.qos.logback', 'logback-core', '1.2.3'),
+  repoJar('org.slf4j', 'slf4j-api', '1.7.30'),
+  repoJar('org.mybatis', 'mybatis', '3.5.6'),
   path.join(JAVA_HOME, 'db', 'lib', 'derby.jar'),
 ];
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-java-'));
@@ -126,6 +130,127 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     const tx = await waitTx('GET /boom');
     assert.equal(tx.status, 500);
     assert.equal(tx.error, 'HTTP 500');
+  });
+
+  const exceptions = (tx) => tx.spans.filter((s) => s.type === 'exception').map((s) => [s.text, s.error, s.depth]);
+
+  test('잡아서 ERROR 로그로 남긴 예외는 200이어도 에러이고 예외 구간이 남는다', async () => {
+    assert.equal(await get('/caught'), 200);
+    const tx = await waitTx('GET /caught');
+    assert.equal(tx.status, 200);
+    assert.equal(tx.error, 'IllegalStateException: 재고 없음');
+    assert.deepEqual(exceptions(tx), [['주문 저장 실패', 'IllegalStateException: 재고 없음', 0]]);
+    assert.equal(tx.spans[0].elapsed, 0);
+  });
+
+  test('예외 없는 ERROR 로그는 메시지가 에러', async () => {
+    assert.equal(await get('/errlog'), 200);
+    const tx = await waitTx('GET /errlog');
+    assert.equal(tx.error, '결재 실패 id=7');
+    assert.deepEqual(exceptions(tx), [['결재 실패 id=7', '결재 실패 id=7', 0]]);
+  });
+
+  test('printStackTrace()도 에러', async () => {
+    assert.equal(await get('/printed'), 200);
+    const tx = await waitTx('GET /printed');
+    assert.equal(tx.error, 'IllegalArgumentException: 잘못된 값');
+    assert.deepEqual(exceptions(tx), [['printStackTrace()', 'IllegalArgumentException: 잘못된 값', 0]]);
+  });
+
+  test('WARN 로그는 에러가 아니다', async () => {
+    assert.equal(await get('/warn'), 200);
+    const tx = await waitTx('GET /warn');
+    assert.equal(tx.error, null);
+    assert.deepEqual(tx.spans, []);
+  });
+
+  test('예외가 여럿이면 첫 번째가 요청 에러, 요청 밖 ERROR 로그는 어디에도 없다', async () => {
+    assert.equal(await get('/twice'), 200);
+    const tx = await waitTx('GET /twice');
+    assert.equal(tx.error, 'RuntimeException: a');
+    assert.deepEqual(exceptions(tx).map((e) => e[1]), ['RuntimeException: a', 'RuntimeException: b']);
+    const all = store.points(0).map((p) => store.get(p.id));
+    assert.ok(all.every((t) => t.spans.every((s) => s.text !== '기동 중 에러')));
+  });
+
+  const flow = (tx) => tx.spans.map((s) => [s.type, s.type === 'sql' ? s.text.slice(0, 11) : s.text, s.depth]);
+
+  test('Controller → Service → 매퍼 → SQL이 들여쓰기 순서로 남고, getter·프록시는 줄이 없다', async () => {
+    assert.equal(await get('/flow'), 200);
+    const tx = await waitTx('GET /flow');
+    assert.deepEqual(flow(tx), [
+      ['method', 'TestAppOrderController.save', 0],
+      ['method', 'TestAppOrderServiceImpl.saveOrder', 1],
+      ['mapper', 'TestAppItemMapper.name', 2],
+      ['sql', 'select name', 3],
+    ]);
+    const [ctrl, svc, mapper, sql] = tx.spans;
+    assert.ok(ctrl.elapsed >= svc.elapsed && svc.elapsed >= mapper.elapsed && mapper.elapsed >= sql.elapsed);
+  });
+
+  test('컨트롤러의 getter 모양 요청 처리 메서드는 줄이 있다', async () => {
+    assert.equal(await get('/getitem'), 200);
+    const tx = await waitTx('GET /getitem');
+    assert.deepEqual(flow(tx).slice(0, 2), [
+      ['method', 'TestAppOrderController.getItem', 0],
+      ['method', 'TestAppOrderServiceImpl.saveOrder', 1],
+    ]);
+  });
+
+  test('구간 한도를 채운 뒤 남긴 예외도 요청 에러다', async () => {
+    assert.equal(await get('/floodlog'), 200);
+    const tx = await waitTx('GET /floodlog');
+    assert.ok(tx.droppedSpans > 0, String(tx.droppedSpans));
+    assert.equal(tx.error, 'IllegalStateException: 한도 뒤');
+  });
+
+  test('메서드가 던진 예외는 그 줄에 남고, 잡혔으면 요청은 에러가 아니다', async () => {
+    assert.equal(await get('/flowfail'), 200);
+    const tx = await waitTx('GET /flowfail');
+    assert.deepEqual(tx.spans.map((s) => [s.text, s.depth, s.error]), [
+      ['TestAppOrderController.saveFail', 0, null],
+      ['TestAppOrderServiceImpl.failOrder', 1, 'IllegalStateException: 재고 없음'],
+    ]);
+    assert.equal(tx.error, null);
+  });
+
+  test('처리 중 목록의 마지막 호출은 메서드가 아니라 SQL', async () => {
+    const res = get('/flowslow');
+    const item = await waitFor(
+      () => store.active().find((a) => a.name === 'GET /flowslow' && /pause/.test(a.where ?? '')), '처리 중 목록', 5000);
+    assert.match(item.lastSpan, /^select name from item/);
+    assert.equal(await res, 200);
+  });
+
+  test('요청 정보: X-Forwarded-For 첫 IP, Referer, Spring Security 사용자, 비밀 파라미터 가림', async () => {
+    const res = await fetch(`http://localhost:${app.port}/req?x=1&password=secret&x=2`, {
+      headers: { Referer: 'http://localhost/list', 'X-Forwarded-For': ' 10.0.0.9 , 10.0.0.1' },
+    });
+    assert.equal(res.status, 200);
+    const tx = await waitTx('GET /req');
+    assert.deepEqual(tx.req, { ip: '10.0.0.9', user: 'hong01', referer: 'http://localhost/list', params: 'x=1&x=2&password=****' });
+  });
+
+  test('요청 정보: 세션 loginUser의 getUserId, 세션 없으면 사용자·파라미터 없음', async () => {
+    assert.equal(await get('/req2'), 200);
+    assert.equal((await waitTx('GET /req2')).req.user, 'kim02');
+    const n = stored('GET /hello').length + 1; // 요청 전에 센다
+    assert.equal(await get('/hello'), 200);
+    const hello = await waitTx('GET /hello', n);
+    assert.equal(hello.req.user, null);
+    assert.equal(hello.req.params, null);
+    assert.equal(hello.req.referer, null);
+    assert.ok(hello.req.ip);
+  });
+
+  test('파라미터는 값 200자, 전체 2,000자에서 자른다', async () => {
+    const long = 'v'.repeat(300);
+    const n = stored('GET /hello').length + 1; // 요청 전에 센다
+    assert.equal(await get(`/hello?a=${long}&${Array.from({ length: 20 }, (_, i) => `k${i}=${long}`).join('&')}`), 200);
+    const tx = await waitTx('GET /hello', n);
+    assert.ok(tx.req.params.startsWith(`a=${'v'.repeat(200)}...&k0=`), tx.req.params.slice(0, 220));
+    assert.equal(tx.req.params.length, 2003);
+    assert.ok(tx.req.params.endsWith('...'));
   });
 
   test('정적 파일 요청은 기록하지 않는다', async () => {

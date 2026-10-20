@@ -51,6 +51,8 @@ public final class Tracer {
   // connect()·getOutputStream()에서 먼저 연결한 HttpURLConnection → 아직 응답을 못 받은 구간.
   // getInputStream()이 이어 받아 연결·본문 전송·응답 헤더를 구간 하나로 잰다. 응답을 안 읽고 버린 연결은 GC가 치운다.
   private static final Map<Object, Span> PENDING = Collections.synchronizedMap(new WeakHashMap<Object, Span>());
+  // 겹쳐 불리는 MyBatis Executor(CachingExecutor → SimpleExecutor) 가운데 바깥 한 번만
+  private static final ThreadLocal<int[]> MAPPER = ThreadLocal.withInitial(() -> new int[1]);
 
   public static final class Tx {
     final String id = UUID.randomUUID().toString();
@@ -61,6 +63,9 @@ public final class Tracer {
     final List<Span> spans = Collections.synchronizedList(new ArrayList<Span>());
     int dropped;
     int chars; // 담은 구간 글자 수. MAX_BODY를 넘으면 어차피 못 보내므로 더 담지 않는다(앱 힙 보호)
+    int level; // 지금 열린 메서드·매퍼 구간 수
+    String ip, user, referer, params; // 요청 정보(RequestInfo가 끝날 때 채운다)
+    String firstError; // 앱이 남긴 첫 예외. 구간 한도로 예외 구간을 못 남겨도 요청 에러는 이것으로 정한다
     double elapsed;
     int status;
     String error;
@@ -71,17 +76,19 @@ public final class Tracer {
   }
 
   public static final class Span {
-    final String type; // "sql" 또는 "http"
+    final String type; // "sql", "http", "exception", "method", "mapper"
     final String text;
     final long t0 = System.nanoTime();
     final double offset;
+    final int depth; // 열린 메서드·매퍼 구간 수(들여쓰기)
     double elapsed;
     String error;
 
-    Span(String type, String text, double offset) {
+    Span(String type, String text, double offset, int depth) {
       this.type = type;
       this.text = text;
       this.offset = offset;
+      this.depth = depth;
     }
   }
 
@@ -115,10 +122,13 @@ public final class Tracer {
     OPEN.remove(tx.id);
     tx.elapsed = ms(System.nanoTime() - tx.t0);
     tx.status = status;
-    if (status >= 500) {
-      tx.error = "HTTP " + status;
-      synchronized (tx.spans) {
-        for (Span s : tx.spans) if (s.error != null) tx.error = s.error; // 마지막으로 실패한 구간
+    tx.error = tx.firstError; // 앱이 남긴 첫 예외가 원인에 가깝다
+    synchronized (tx.spans) {
+      if (tx.error == null && status >= 500) {
+        tx.error = "HTTP " + status;
+        for (Span s : tx.spans) { // 마지막으로 실패한 SQL·외부 구간
+          if (s.error != null && ("sql".equals(s.type) || "http".equals(s.type))) tx.error = s.error;
+        }
       }
     }
     synchronized (Tracer.class) {
@@ -127,26 +137,125 @@ public final class Tracer {
     }
   }
 
+  // 요청이 끝날 때 RequestInfo가 정리해 넘긴다
+  public static void request(Tx tx, String ip, String user, String referer, String params) {
+    tx.ip = ip;
+    tx.user = user;
+    tx.referer = cut(referer);
+    tx.params = params;
+  }
+
   public static void remember(Object stmt, String sql) {
     if (stmt != null && sql != null) SQL.put(stmt, sql);
+  }
+
+  // 구간 수·글자 수 한도를 넘었으면 개수만 센다
+  private static boolean full(Tx tx) {
+    if (tx.spans.size() < MAX_SPANS && tx.chars < MAX_BODY) return false;
+    tx.dropped++;
+    return true;
   }
 
   // 바깥 호출이고 요청 안이면 지금 트랜잭션을, 아니면 null. 깊이는 늘 올리고 짝이 되는 *End가 내린다.
   private static Tx outer() {
     if (DEPTH.get()[0]++ > 0) return null;
     Tx tx = CURRENT.get();
-    if (tx != null && (tx.spans.size() >= MAX_SPANS || tx.chars >= MAX_BODY)) {
-      tx.dropped++;
-      return null;
-    }
-    return tx;
+    return tx == null || full(tx) ? null : tx;
   }
 
   private static Span open(Tx tx, String type, String text) {
-    Span s = new Span(type, text, ms(System.nanoTime() - tx.t0));
+    Span s = new Span(type, text, ms(System.nanoTime() - tx.t0), tx.level);
     tx.chars += text.length();
     tx.spans.add(s);
     return s;
+  }
+
+  static String cut(String s) {
+    return s != null && s.length() > MAX_SQL ? s.substring(0, MAX_SQL) : s;
+  }
+
+  // 예외 표시: 단순클래스명: 메시지
+  public static String exceptionText(String className, String msg) {
+    String simple = className.substring(className.lastIndexOf('.') + 1);
+    return msg == null ? simple : simple + ": " + msg;
+  }
+
+  // 앱이 남긴 예외(ERROR 로그, printStackTrace). 요청 밖이면 버린다. SQL 깊이와 상관없이 기록한다.
+  public static void exception(String text, String error) {
+    try {
+      Tx tx = CURRENT.get();
+      if (tx == null) return;
+      if (tx.firstError == null) tx.firstError = cut(error);
+      if (full(tx)) return;
+      open(tx, "exception", cut(text)).error = cut(error);
+    } catch (Throwable ignored) {
+      // 앱으로 새지 않게
+    }
+  }
+
+  // Logback ERROR 이벤트. throwableClass가 null이면 예외 없는 로그
+  public static void logError(String msg, String throwableClass, String throwableMsg) {
+    String text = msg == null || msg.isEmpty() ? "(메시지 없음)" : msg;
+    exception(text, throwableClass == null ? text : exceptionText(throwableClass, throwableMsg));
+  }
+
+  public static void printed(String throwableClass, String throwableMsg) {
+    exception("printStackTrace()", exceptionText(throwableClass, throwableMsg));
+  }
+
+  // 메서드·매퍼 구간: 만들면 level을 올리고, 닫을 때 내린다. 요청 밖이거나 한도면 만들지 않는다.
+  private static Span enter(String type, String text) {
+    Tx tx = CURRENT.get();
+    if (tx == null || full(tx)) return null;
+    Span s = open(tx, type, text);
+    tx.level++;
+    return s;
+  }
+
+  private static void leave(Span s, Throwable thrown) {
+    if (s == null) return;
+    Tx tx = CURRENT.get();
+    if (tx != null) tx.level--;
+    s.elapsed = ms(System.nanoTime() - s.t0);
+    if (thrown != null) s.error = exceptionText(thrown.getClass().getName(), thrown.getMessage());
+  }
+
+  public static Span methodStart(String typeName, String method) {
+    try {
+      return enter("method", typeName.substring(typeName.lastIndexOf('.') + 1) + "." + method);
+    } catch (Throwable t) {
+      return null;
+    }
+  }
+
+  public static void methodEnd(Span s, Throwable thrown) {
+    try {
+      leave(s, thrown);
+    } catch (Throwable ignored) {
+      // 앱으로 새지 않게
+    }
+  }
+
+  public static Span mapperStart(String statementId) {
+    if (MAPPER.get()[0]++ > 0) return null;
+    try {
+      return enter("mapper", mapperName(statementId));
+    } catch (Throwable t) {
+      return null;
+    }
+  }
+
+  public static void mapperEnd(Span s, Throwable thrown) {
+    MAPPER.get()[0]--;
+    methodEnd(s, thrown);
+  }
+
+  // org.kipa…EvlMapper.insertResult → EvlMapper.insertResult
+  static String mapperName(String id) {
+    int dot = id.lastIndexOf('.');
+    if (dot < 0) return id;
+    String ns = id.substring(0, dot);
+    return ns.substring(ns.lastIndexOf('.') + 1) + id.substring(dot);
   }
 
   private static void close(Span s, String error) {
@@ -380,7 +489,10 @@ public final class Tracer {
       first = false;
       String last = null;
       synchronized (t.spans) {
-        if (!t.spans.isEmpty()) last = t.spans.get(t.spans.size() - 1).text;
+        for (int i = t.spans.size() - 1; i >= 0 && last == null; i--) { // 마지막 SQL·외부 호출(메서드·매퍼·예외 줄은 건너뜀)
+          Span s = t.spans.get(i);
+          if ("sql".equals(s.type) || "http".equals(s.type)) last = s.text;
+        }
       }
       // 처리 중 목록은 매 전송에 실리므로 짧게. 멈춘 요청이 많아도 본문이 수집 서버 한도(1MB)를 넘지 않게 한다
       if (last != null && last.length() > MAX_LAST) last = last.substring(0, MAX_LAST) + "...";
@@ -417,6 +529,7 @@ public final class Tracer {
         num(one, s.elapsed);
         one.append(",\"error\":");
         str(one, s.error);
+        one.append(",\"depth\":").append(s.depth);
         one.append('}');
         String json = one.toString();
         left -= utf8(json) + 1;
@@ -434,6 +547,15 @@ public final class Tracer {
     num(b, t.elapsed);
     b.append(",\"status\":").append(t.status).append(",\"error\":");
     str(b, t.error);
+    b.append(",\"req\":{\"ip\":");
+    str(b, t.ip);
+    b.append(",\"user\":");
+    str(b, t.user);
+    b.append(",\"referer\":");
+    str(b, t.referer);
+    b.append(",\"params\":");
+    str(b, t.params);
+    b.append('}');
     if (dropped > 0) b.append(",\"droppedSpans\":").append(dropped);
     return b.append(",\"spans\":[").append(spans).append("]}").toString();
   }
