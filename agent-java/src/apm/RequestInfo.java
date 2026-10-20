@@ -36,7 +36,7 @@ public final class RequestInfo {
   }
 
   // API별 통계의 묶음 이름. Spring이 고른 패턴이 실제 경로와 맞을 때만 "GET /ctx/qna/{procsCode}/list", 아니면 null
-  static String route(HttpServletRequest r) {
+  public static String route(HttpServletRequest r) { // ForwardAdvice가 Tomcat 클래스 안에서 부르므로 public
     Object p = r.getAttribute(PATTERN_ATTR); // String 또는 Spring 5.3 PathPattern(toString이 패턴)
     if (p == null) return null;
     String pattern = p.toString();

@@ -267,6 +267,11 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     }
   });
 
+  test('에러로 /error에 forward된 요청도 원래 패턴으로 묶인다', async () => {
+    assert.equal(await get('/fwd/3'), 200);
+    assert.equal((await waitTx('GET /fwd/3')).route, 'GET /fwd/{id}');
+  });
+
   test('정적 파일 요청은 기록하지 않는다', async () => {
     assert.equal(await get('/app.js'), 200);
     assert.equal(await get('/hello'), 200);

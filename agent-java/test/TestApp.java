@@ -57,6 +57,12 @@ public class TestApp {
           if (path.startsWith("/items/")) req.setAttribute(PATTERN, "/items/{id}");
           else if (path.startsWith("/other/")) req.setAttribute(PATTERN, "/error");
           else if (path.startsWith("/files/")) req.setAttribute(PATTERN, "/**");
+          else if (path.equals("/errpage")) req.setAttribute(PATTERN, "/error"); // Spring Boot의 에러 처리(BasicErrorController)
+          if (path.startsWith("/fwd/")) { // 컨트롤러가 예외를 던져 /error로 넘어간 요청: 원래 패턴이 덮이기 전에 잡아야 한다
+            req.setAttribute(PATTERN, "/fwd/{id}");
+            req.getRequestDispatcher("/errpage").forward(req, res);
+            return;
+          }
           switch (path) {
             case "/ok":
               try (PreparedStatement p = db.prepareStatement(

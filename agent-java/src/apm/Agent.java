@@ -49,7 +49,7 @@ public final class Agent {
       @Override
       public void onError(String type, ClassLoader loader, JavaModule module, boolean loaded, Throwable t) {
         // ponytail: 대상인지 이름으로만 거른다. 하위 타입 판정 중 무관한 클래스에서 나는 오류는 숨긴다.
-        if (type.endsWith("StandardHostValve") || type.contains("Statement") || type.contains("Connection")
+        if (type.endsWith("StandardHostValve") || type.endsWith("ApplicationDispatcher") ||type.contains("Statement") || type.contains("Connection")
             || type.endsWith("RealCall") || type.endsWith("Executor") || type.equals("ch.qos.logback.classic.Logger")
             || type.equals("java.lang.Throwable")) {
           System.err.println("[apm] 계측 실패: " + type + " " + t);
@@ -62,6 +62,10 @@ public final class Agent {
         .type(named("org.apache.catalina.core.StandardHostValve"))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(RequestAdvice.class).on(named("invoke").and(takesArguments(2)))))
+        // /error 등으로 넘어가기 직전의 Spring 패턴(API별 통계의 route)
+        .type(named("org.apache.catalina.core.ApplicationDispatcher"))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(ForwardAdvice.class).on(named("forward").and(takesArguments(2)))))
         // 추상 클래스도 포함한다. Hikari의 ProxyPreparedStatement·ProxyConnection은 추상 클래스지만 실행 메서드를 직접 구현한다.
         .type(isSubTypeOf(Statement.class).and(not(isInterface())))
         .transform((builder, type, loader, module) ->

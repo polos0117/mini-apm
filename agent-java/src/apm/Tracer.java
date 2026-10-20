@@ -144,7 +144,13 @@ public final class Tracer {
     tx.user = user;
     tx.referer = cut(referer);
     tx.params = params;
-    tx.route = cut(route);
+    if (tx.route == null) tx.route = cut(route); // forward 전에 정한 것이 있으면 그것(keepRoute)
+  }
+
+  // forward 직전에 ForwardAdvice가 부른다. 처음 정해진 route만 남긴다
+  public static void keepRoute(String route) {
+    Tx tx = CURRENT.get();
+    if (tx != null && tx.route == null && route != null) tx.route = cut(route);
   }
 
   public static void remember(Object stmt, String sql) {
