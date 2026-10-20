@@ -1,6 +1,7 @@
 import { createAlerts } from './alerts.mjs';
 import {
-  downSec, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, ROUTE_COLS, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, yMax,
+  downSec, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, ROUTE_COLS, routeSort, selfTime, slowLevel, sortPicked, sortRoutes,
+  spanKinds, yMax,
 } from './calc.mjs';
 
 const WINDOW_MS = 5 * 60 * 1000;            // X-View에 보이는 시간
@@ -473,24 +474,43 @@ async function showDetail(id) {
   req.className = 'req';
   req.textContent = info;
 
+  // 범례를 누르면 그 종류 구간만(들여쓰기 없이). 같은 것을 다시 누르면 전체. 다른 트랜잭션을 열면 전체부터
   const table = document.createElement('table');
-  for (const s of tx.spans) {
-    const label = s.error ? `${s.text}  (${s.error})` : s.text;
-    table.append(spanRow(KIND[s.type] ?? s.type, label, s.offset / total, s.elapsed, s.elapsed / total, s.error,
-      s.depth ?? 0, s.type));
-  }
-  if (tx.droppedSpans) table.append(row('td', ['…', `호출 ${tx.droppedSpans}개 생략(트랜잭션당 1000개까지 기록, 생략분 시간은 아래에 포함)`]));
-  table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null, 0, 'self'));
   const legend = document.createElement('p');
-  legend.className = 'req';
+  legend.id = 'kinds';
+  const kinds = spanKinds(tx.spans);
+  let only = null;
+  const drawSpans = () => {
+    table.replaceChildren();
+    for (const s of tx.spans) {
+      if (only && s.type !== only) continue;
+      const label = s.error ? `${s.text}  (${s.error})` : s.text;
+      table.append(spanRow(KIND[s.type] ?? s.type, label, s.offset / total, s.elapsed, s.elapsed / total, s.error,
+        only ? 0 : s.depth ?? 0, s.type));
+    }
+    if (only) return;
+    if (tx.droppedSpans) table.append(row('td', ['…', `호출 ${tx.droppedSpans}개 생략(트랜잭션당 1000개까지 기록, 생략분 시간은 아래에 포함)`]));
+    table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null, 0, 'self'));
+  };
   legend.append(...Object.entries(KIND).map(([t, name]) => {
-    const k = document.createElement('span');
-    k.className = `k-${t}`;
-    k.textContent = `■ ${name}   `;
-    return k;
+    const k = kinds[t];
+    const b = document.createElement('button');
+    b.className = `k-${t}`;
+    b.textContent = `■ ${name} ${k?.count ?? 0}건${k?.ms != null ? ` · ${duration(k.ms)}` : ''}`;
+    b.disabled = !k;
+    b.onclick = () => {
+      only = only === t ? null : t;
+      for (const x of legend.children) x.classList.toggle('on', x === b && only !== null);
+      legend.classList.toggle('filtered', only !== null);
+      drawSpans();
+    };
+    return b;
   }));
+  drawSpans();
   box.replaceChildren(...(info ? [head, req, legend, table] : [head, legend, table]));
 }
+
+const duration = (ms) => (ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}초`);
 
 // left·width는 전체 대비 비율(0~1). left가 null이면 막대 없이 시간만. depth만큼 들여쓰고, 종류(type)마다 색이 다르다.
 function spanRow(kind, text, left, elapsed, width, error, depth, type) {

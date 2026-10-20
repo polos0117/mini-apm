@@ -42,6 +42,11 @@
   .k-sql { color: var(--sql); }
   .k-http { color: var(--http); }
   .k-exception { color: var(--err); }
+  #kinds { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+  #kinds button { padding: 2px 10px; font-size: 13px; }
+  #kinds button:disabled { color: var(--dim); opacity: 0.5; }
+  #kinds.filtered button:not(.on) { opacity: 0.45; }
+  #kinds button.on { border-color: currentColor; }
   .bar i.k-method { background: var(--method); opacity: 0.55; }
   .bar i.k-mapper { background: var(--mapper); opacity: 0.55; }
   .bar i.k-sql { background: var(--sql); }

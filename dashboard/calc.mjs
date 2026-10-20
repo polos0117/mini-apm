@@ -77,3 +77,15 @@ export function pickSort(saved) {
   const [col, dir] = String(saved).split(':');
   return PICK_COLS.includes(col) ? { col, desc: dir !== 'asc' } : { col: 'elapsed', desc: true };
 }
+
+// 상세 범례의 종류별 건수·시간 합. 메서드는 안쪽 메서드와 겹쳐 합이 두 번 세어지므로 시간 합은 매퍼·SQL·외부만
+const SUMMED = ['mapper', 'sql', 'http'];
+export function spanKinds(spans) {
+  const out = {};
+  for (const s of spans) {
+    const k = (out[s.type] ??= { count: 0, ms: SUMMED.includes(s.type) ? 0 : null });
+    k.count++;
+    if (k.ms !== null) k.ms += s.elapsed;
+  }
+  return out;
+}

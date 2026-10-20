@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, nextSort, nextPickSort, pickSort, pickInRect, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, yMax } from '../dashboard/calc.mjs';
+import { downSec, nextSort, nextPickSort, pickSort, pickInRect, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, spanKinds, yMax } from '../dashboard/calc.mjs';
 
 test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
   const spans = [
@@ -96,4 +96,17 @@ test('nextPickSort·pickSort: 이름만 처음 가나다순, 모르는 값이면
   assert.deepEqual(pickSort('t:asc'), { col: 't', desc: false });
   assert.deepEqual(pickSort('zzz'), { col: 'elapsed', desc: true });
   assert.deepEqual(pickSort(null), { col: 'elapsed', desc: true });
+});
+
+test('spanKinds: 종류별 건수, 시간 합은 매퍼·SQL·외부만(메서드는 겹쳐서 null)', () => {
+  const spans = [
+    { type: 'method', elapsed: 900 }, { type: 'method', elapsed: 800 },
+    { type: 'mapper', elapsed: 500 }, { type: 'sql', elapsed: 400 }, { type: 'sql', elapsed: 100 },
+    { type: 'http', elapsed: 300 }, { type: 'exception', elapsed: 0 },
+  ];
+  assert.deepEqual(spanKinds(spans), {
+    method: { count: 2, ms: null }, mapper: { count: 1, ms: 500 }, sql: { count: 2, ms: 500 },
+    http: { count: 1, ms: 300 }, exception: { count: 1, ms: null },
+  });
+  assert.deepEqual(spanKinds([]), {});
 });
