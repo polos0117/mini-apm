@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, pickInRect, yMax } from '../dashboard/calc.mjs';
+import { downSec, pickInRect, selfTime, yMax } from '../dashboard/calc.mjs';
+
+test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
+  const spans = [
+    { elapsed: 80, depth: 0 }, // 메서드
+    { elapsed: 70, depth: 1 }, // 그 안의 SQL: 두 번 빼면 안 된다
+    { elapsed: 5 },            // Node 에이전트 구간(depth 없음)
+  ];
+  assert.equal(selfTime(100, spans), 15);
+  assert.equal(selfTime(50, spans), 0);
+  assert.equal(selfTime(10, []), 10);
+});
 
 test('downSec: 1~600 정수만, 그 밖이면 10', () => {
   assert.equal(downSec('30'), 30);

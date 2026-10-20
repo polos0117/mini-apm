@@ -1,5 +1,5 @@
 import { createAlerts } from './alerts.mjs';
-import { downSec, pickInRect, yMax } from './calc.mjs';
+import { downSec, pickInRect, selfTime, yMax } from './calc.mjs';
 
 const WINDOW_MS = 5 * 60 * 1000;            // X-View에 보이는 시간
 const PAD = { l: 52, r: 24, t: 8, b: 22 };   // 축 글자 자리
@@ -8,6 +8,7 @@ const MAX_ERRORS = 50;                       // 최근 에러 패널 줄 수
 const MAX_BANNER = 5;                        // 빨간 줄에 보이는 경보 수
 const SHAPES = ['●', '▲', '■', '◆'];         // 앱마다 점 모양(agents 순서로 반복)
 const ZERO = { tps: 0, avg: 0, p95: 0, errors: 0 };
+const KIND = { method: '메서드', mapper: '매퍼', sql: 'SQL', http: '외부', exception: '예외' }; // 상세의 구간 종류
 const TITLE = document.title;
 const COLOR = { ok: '#4ea1ff', err: '#ff5c5c', grid: '#2a3440', dim: '#8593a3', drag: '#ffcc4d' };
 
@@ -357,26 +358,35 @@ async function showDetail(id) {
   if (!res.ok) return (box.textContent = '이미 정리된 트랜잭션입니다(10분 경과).');
   const tx = await res.json();
   const total = tx.elapsed || 1;
-  const self = Math.max(0, tx.elapsed - tx.spans.reduce((sum, s) => sum + s.elapsed, 0));
+  const self = selfTime(tx.elapsed, tx.spans);
 
   const head = document.createElement('p');
   head.textContent = `${tx.name}   ${Math.round(tx.elapsed)}ms   상태 ${tx.status}${tx.error ? `   — ${tx.error}` : ''}`;
   if (tx.error) head.className = 'err';
+  // 누가 어느 화면에서 무엇을 보냈나(Java 에이전트만). 값이 있는 것만
+  const r = tx.req ?? {};
+  const info = [['사용자', r.user], ['IP', r.ip], ['화면', r.referer], ['파라미터', r.params]]
+    .filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('  ·  ');
+  const req = document.createElement('p');
+  req.className = 'req';
+  req.textContent = info;
 
   const table = document.createElement('table');
   for (const s of tx.spans) {
     const label = s.error ? `${s.text}  (${s.error})` : s.text;
-    table.append(spanRow(s.type === 'sql' ? 'SQL' : '외부', label, s.offset / total, s.elapsed, s.elapsed / total, s.error));
+    table.append(spanRow(KIND[s.type] ?? s.type, label, s.offset / total, s.elapsed, s.elapsed / total, s.error,
+      s.depth ?? 0, s.type === 'method' || s.type === 'mapper'));
   }
   if (tx.droppedSpans) table.append(row('td', ['…', `호출 ${tx.droppedSpans}개 생략(트랜잭션당 1000개까지 기록, 생략분 시간은 아래에 포함)`]));
-  table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null));
-  box.replaceChildren(head, table);
+  table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null, 0, false));
+  box.replaceChildren(...(info ? [head, req, table] : [head, table]));
 }
 
-// left·width는 전체 대비 비율(0~1). left가 null이면 막대 없이 시간만.
-function spanRow(kind, text, left, elapsed, width, error) {
+// left·width는 전체 대비 비율(0~1). left가 null이면 막대 없이 시간만. depth만큼 들여쓰고, dim이면 막대를 흐리게(메서드·매퍼).
+function spanRow(kind, text, left, elapsed, width, error, depth, dim) {
   const tr = row('td', [kind, text]);
   tr.children[1].className = 'text';
+  tr.children[1].style.paddingLeft = `${8 + depth * 16}px`;
   if (error) tr.className = 'err';
   const barCell = document.createElement('td');
   const bar = document.createElement('div');
@@ -385,7 +395,7 @@ function spanRow(kind, text, left, elapsed, width, error) {
     const fill = document.createElement('i');
     fill.style.left = `${left * 100}%`;
     fill.style.width = `${Math.max(0.5, width * 100)}%`;
-    if (error) fill.className = 'err';
+    fill.className = error ? 'err' : dim ? 'dim' : '';
     bar.append(fill);
   }
   barCell.append(bar);

@@ -32,6 +32,8 @@
   .bar { position: relative; height: 10px; min-width: 240px; background: #0b0f13; }
   .bar i { position: absolute; top: 0; bottom: 0; background: var(--ok); }
   .bar i.err { background: var(--err); }
+  .bar i.dim { background: var(--dim); opacity: 0.6; }
+  .req { margin: -4px 0 8px; color: var(--dim); word-break: break-all; }
   #status { font-weight: 400; }
   #alertbar { display: flex; gap: 12px; align-items: flex-start; background: #3a1418; border: 1px solid var(--err); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
   #alertbar[hidden] { display: none; }
