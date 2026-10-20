@@ -7,6 +7,8 @@ const MAX_ROUTES = 2000;         // 앱마다 API별 누계 키 수. 넘치면 (
 const OTHER = '(기타)';
 const LOG_STEP = Math.log(1.1);  // 누계 p95용 응답시간 구간(약 10%씩)
 
+const { compare, routeKey } = require('./compare');
+
 const end = (tx) => tx.start + tx.elapsed;
 const isTx = (t) =>
   t !== null && typeof t === 'object' && typeof t.id === 'string' &&
@@ -17,7 +19,6 @@ const toPoint = (tx) => ({
   id: tx.id, name: tx.name, t: end(tx), elapsed: tx.elapsed, error: Boolean(tx.error),
   agent: tx.agent, msg: typeof tx.error === 'string' ? tx.error.slice(0, MAX_MSG) : null,
 });
-const routeKey = (tx) => (typeof tx.route === 'string' && tx.route ? tx.route : String(tx.name));
 const bucket = (ms) => (ms < 1 ? 0 : Math.floor(Math.log(ms) / LOG_STEP) + 1); // 구간 i = [1.1^(i-1), 1.1^i)
 const sum = (list) => list.reduce((a, tx) => a + tx.elapsed, 0);
 
@@ -132,6 +133,14 @@ function createStore() {
     },
     routeTxs(agent, key) {
       return txs.filter((tx) => tx.agent === agent && routeKey(tx) === key).map(toPoint).sort((a, b) => b.elapsed - a.elapsed);
+    },
+    // 무엇이 다른가: 고른 id(보관 중·같은 앱)와 since 이후에 끝난 나머지(같은 앱)
+    compare(ids, since, agent) {
+      const mine = (tx) => !agent || tx.agent === agent;
+      const want = new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []);
+      const picked = [...want].map((id) => byId.get(id)).filter((tx) => tx && mine(tx));
+      const chosen = new Set(picked);
+      return compare(picked, txs.filter((tx) => mine(tx) && end(tx) >= since && !chosen.has(tx)));
     },
     stats(secStart) {
       return summarize(inSecond(secStart));
