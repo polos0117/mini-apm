@@ -13,8 +13,9 @@ public final class RequestAdvice {
   }
 
   @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
-  static void exit(@Advice.Enter Tracer.Tx tx, @Advice.Argument(1) HttpServletResponse res,
-      @Advice.Thrown Throwable thrown) {
+  static void exit(@Advice.Enter Tracer.Tx tx, @Advice.Argument(0) HttpServletRequest req,
+      @Advice.Argument(1) HttpServletResponse res, @Advice.Thrown Throwable thrown) {
+    RequestInfo.collect(tx, req); // 예외를 삼키므로 아래 end는 늘 불린다
     Tracer.end(tx, thrown != null ? 500 : res.getStatus());
   }
 }

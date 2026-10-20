@@ -34,6 +34,7 @@ public final class Agent {
     Tracer.collector = env("APM_COLLECTOR", Tracer.collector);
     Tracer.agent = env("APM_AGENT", Tracer.agent);
     Tracer.appPackage = env("APM_APP_PACKAGE", mainPackage(System.getProperty("sun.java.command")));
+    RequestInfo.userAttr = env("APM_USER_ATTR", RequestInfo.userAttr);
     long interval = 1000;
     try {
       interval = Long.parseLong(env("APM_INTERVAL", "1000"));

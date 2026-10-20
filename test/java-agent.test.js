@@ -206,6 +206,37 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.equal(await res, 200);
   });
 
+  test('요청 정보: X-Forwarded-For 첫 IP, Referer, Spring Security 사용자, 비밀 파라미터 가림', async () => {
+    const res = await fetch(`http://localhost:${app.port}/req?x=1&password=secret&x=2`, {
+      headers: { Referer: 'http://localhost/list', 'X-Forwarded-For': ' 10.0.0.9 , 10.0.0.1' },
+    });
+    assert.equal(res.status, 200);
+    const tx = await waitTx('GET /req');
+    assert.deepEqual(tx.req, { ip: '10.0.0.9', user: 'hong01', referer: 'http://localhost/list', params: 'x=1&x=2&password=****' });
+  });
+
+  test('요청 정보: 세션 loginUser의 getUserId, 세션 없으면 사용자·파라미터 없음', async () => {
+    assert.equal(await get('/req2'), 200);
+    assert.equal((await waitTx('GET /req2')).req.user, 'kim02');
+    const n = stored('GET /hello').length + 1; // 요청 전에 센다
+    assert.equal(await get('/hello'), 200);
+    const hello = await waitTx('GET /hello', n);
+    assert.equal(hello.req.user, null);
+    assert.equal(hello.req.params, null);
+    assert.equal(hello.req.referer, null);
+    assert.ok(hello.req.ip);
+  });
+
+  test('파라미터는 값 200자, 전체 2,000자에서 자른다', async () => {
+    const long = 'v'.repeat(300);
+    const n = stored('GET /hello').length + 1; // 요청 전에 센다
+    assert.equal(await get(`/hello?a=${long}&${Array.from({ length: 20 }, (_, i) => `k${i}=${long}`).join('&')}`), 200);
+    const tx = await waitTx('GET /hello', n);
+    assert.ok(tx.req.params.startsWith(`a=${'v'.repeat(200)}...&k0=`), tx.req.params.slice(0, 220));
+    assert.equal(tx.req.params.length, 2003);
+    assert.ok(tx.req.params.endsWith('...'));
+  });
+
   test('정적 파일 요청은 기록하지 않는다', async () => {
     assert.equal(await get('/app.js'), 200);
     assert.equal(await get('/hello'), 200);

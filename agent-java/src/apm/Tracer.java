@@ -64,6 +64,7 @@ public final class Tracer {
     int dropped;
     int chars; // 담은 구간 글자 수. MAX_BODY를 넘으면 어차피 못 보내므로 더 담지 않는다(앱 힙 보호)
     int level; // 지금 열린 메서드·매퍼 구간 수
+    String ip, user, referer, params; // 요청 정보(RequestInfo가 끝날 때 채운다)
     double elapsed;
     int status;
     String error;
@@ -138,6 +139,14 @@ public final class Tracer {
       done.add(tx);
       if (done.size() > MAX_BUFFER) done.subList(0, done.size() - MAX_BUFFER).clear();
     }
+  }
+
+  // 요청이 끝날 때 RequestInfo가 정리해 넘긴다
+  public static void request(Tx tx, String ip, String user, String referer, String params) {
+    tx.ip = ip;
+    tx.user = user;
+    tx.referer = cut(referer);
+    tx.params = params;
   }
 
   public static void remember(Object stmt, String sql) {
@@ -540,6 +549,15 @@ public final class Tracer {
     num(b, t.elapsed);
     b.append(",\"status\":").append(t.status).append(",\"error\":");
     str(b, t.error);
+    b.append(",\"req\":{\"ip\":");
+    str(b, t.ip);
+    b.append(",\"user\":");
+    str(b, t.user);
+    b.append(",\"referer\":");
+    str(b, t.referer);
+    b.append(",\"params\":");
+    str(b, t.params);
+    b.append('}');
     if (dropped > 0) b.append(",\"droppedSpans\":").append(dropped);
     return b.append(",\"spans\":[").append(spans).append("]}").toString();
   }

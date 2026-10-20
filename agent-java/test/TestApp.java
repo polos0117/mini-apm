@@ -136,6 +136,12 @@ public class TestApp {
                 }
               }
               break;
+            case "/req":
+              req.getSession().setAttribute("SPRING_SECURITY_CONTEXT", new TestAppSecurityContext());
+              break;
+            case "/req2":
+              req.getSession().setAttribute("loginUser", new TestAppLoginUser());
+              break;
             case "/flow":
               orders.save(1);
               break;
@@ -297,4 +303,23 @@ class TestAppOrderServiceImpl {
 interface TestAppItemMapper {
   @org.apache.ibatis.annotations.Select("select name from item where id = #{id}")
   String name(int id);
+}
+
+// 세션 속성으로 넣을 가짜 Spring Security 컨텍스트와 로그인 사용자. 공개 클래스가 아니어도 읽혀야 한다.
+class TestAppSecurityContext {
+  public TestAppAuth getAuthentication() {
+    return new TestAppAuth();
+  }
+}
+
+class TestAppAuth {
+  public String getName() {
+    return "hong01";
+  }
+}
+
+class TestAppLoginUser {
+  public String getUserId() {
+    return "kim02";
+  }
 }
