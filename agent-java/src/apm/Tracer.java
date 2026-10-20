@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class Tracer {
   static final int MAX_SPANS = 1000;  // 트랜잭션당 기록할 구간 수. 넘으면 개수만 센다
   static final int MAX_BUFFER = 5000; // 전송 대기 트랜잭션 수
-  static final int MAX_SQL = 1000;    // SQL 문장 길이(문자)
+  static final int MAX_SQL = 100_000; // SQL 문장·URL 길이(문자). 한글이라도 약 300KB라 MAX_BODY 안에 든다
   static final int MAX_PARAM = 200;   // 바인드 값 하나의 길이(문자)
   static final int MAX_BODY = 900_000; // 한 번에 보내는 바이트. 수집 서버 한도(1MB)보다 여유 있게
   static final Set<String> STATIC_EXT = new HashSet<>(Arrays.asList(

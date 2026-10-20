@@ -205,6 +205,14 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.ok(tx.spans[1].error); // 2·3번 값을 안 넣었으니 Derby가 거절한다
   });
 
+  test('긴 SQL도 자르지 않고 보낸다', async () => {
+    assert.equal(await get('/long'), 200);
+    const tx = await waitTx('GET /long');
+    const sql = tx.spans[0].text;
+    assert.ok(sql.length > 5000, String(sql.length));
+    assert.match(sql, /, 1200\) and name <> 'end'$/);
+  });
+
   test('HttpURLConnection 호출이 외부 구간으로 기록되고, 반복 호출·https 위임에도 호출당 하나다', async () => {
     assert.equal(await get('/http'), 200);
     const tx = await waitTx('GET /http');

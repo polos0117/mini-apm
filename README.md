@@ -71,6 +71,8 @@ Eclipse 실행 설정(Run Configurations → 해당 Application)에 두 가지�
 
 SQL 구간에는 바인드 값이 끼워 넣어진 문장이 보인다(예: `where id = 7 and name = '홍길동'`). **DB의 실제 데이터가 대시보드에 그대로 보이므로**, 수집 서버는 이 PC(`127.0.0.1`)에서만 접속을 받는다.
 
+SQL 문장은 10만 자까지 그대로 보이고, 바인드 값 하나는 200자에서 잘라 `...`을 붙인다.
+
 빌드는 JDK 8(`APM_JAVA_HOME`)과 Byte Buddy 1.10.20(`APM_BYTEBUDDY_JAR`)을 쓴다. 기본값은 `D:\AnyBuilder` 아래 경로다.
 
 | 에이전트 | JENNIFER | 여기서 배우는 것 |

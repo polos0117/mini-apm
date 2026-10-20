@@ -70,6 +70,13 @@ public class TestApp {
                 }
               }
               break;
+            case "/long": // MyBatis 동적 SQL처럼 긴 문장(5,000자 넘음)도 잘리지 않아야 한다
+              StringBuilder in = new StringBuilder("select name from item where id in (0");
+              for (int i = 1; i <= 1200; i++) in.append(", ").append(i);
+              try (Statement s = db.createStatement()) {
+                s.executeQuery(in.append(") and name <> 'end'").toString()).close();
+              }
+              break;
             case "/many": // N+1: 한글이 섞인 긴 SQL 1100번 → 그대로 보내면 수집 서버 1MB 한도를 넘는다
               StringBuilder pad = new StringBuilder();
               for (int i = 0; i < 600; i++) pad.append('가');
