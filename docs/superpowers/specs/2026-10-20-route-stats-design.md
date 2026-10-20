@@ -75,7 +75,8 @@
 - Java(`test/java-agent.test.js`, 테스트 앱에 Spring 없음 → 서블릿이 속성을 직접 넣는다):
   - `/items/7` + 패턴 `/items/{id}` → `route` `GET /items/{id}`.
   - `/other/1` + 패턴 `/error` → `route` null.
-  - `/static/a.js` + 패턴 `/**` → `route` null.
+  - `/ctx/items/8`(컨텍스트 경로 `/ctx`) + 패턴 `/items/{id}` → `route` `GET /ctx/items/{id}`.
+  - `/files/a` + 패턴 `/**` → `route` null(`.js` 같은 정적 파일은 에이전트가 아예 기록하지 않으므로 확장자 없는 주소로).
   - 패턴 없는 `/hello` → `route` null.
 - 대시보드: 정렬 계산은 `calc.mjs` 함수로 Node 테스트. Playwright로 표·정렬·기간 전환·줄 클릭 → 고른 트랜잭션 확인.
 
