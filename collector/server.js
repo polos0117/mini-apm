@@ -33,7 +33,8 @@ function createCollector(store = createStore()) {
     return sse({ points, stats: store.stats(sec), agentStats: store.agentStats(sec), agents: store.agents(now), active: store.active(now) });
   };
 
-  function ingest(req, res) {
+  // 본문을 MAX_BODY까지 읽어 JSON 객체면 then(body). 아니면 400
+  function readJson(req, res, then) {
     const chunks = [];
     let size = 0;
     req.on('data', (c) => {
@@ -49,8 +50,22 @@ function createCollector(store = createStore()) {
         return send(res, 400, 'bad json');
       }
       if (body === null || typeof body !== 'object') return send(res, 400, 'bad json');
+      then(body);
+    });
+  }
+
+  function ingest(req, res) {
+    readJson(req, res, (body) => {
       pending.push(...store.ingest(body.agent, body.txs, body.active));
       send(res, 204);
+    });
+  }
+
+  function compare(req, res) {
+    readJson(req, res, (body) => {
+      if (!Array.isArray(body.ids)) return send(res, 400, 'ids must be an array');
+      const since = Number.isFinite(body.since) ? body.since : 0;
+      json(res, 200, store.compare(body.ids, since, typeof body.agent === 'string' ? body.agent : ''));
     });
   }
 
@@ -80,6 +95,7 @@ function createCollector(store = createStore()) {
       return send(res, 400, 'bad url'); // 예: GET //
     }
     if (req.method === 'POST' && pathname === '/ingest') return ingest(req, res);
+    if (req.method === 'POST' && pathname === '/compare') return compare(req, res);
     if (req.method !== 'GET') return send(res, 404, 'not found');
     if (pathname === '/stream') return stream(req, res);
     if (pathname === '/routes') {

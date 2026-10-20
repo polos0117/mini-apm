@@ -115,3 +115,21 @@ test('/routes는 최근 10분(기본)·전체를, /routes/txs는 그 API 트랜�
   assert.deepEqual((await (await fetch(`${base}/routes/txs?${q}`)).json()).map((p) => p.id), ['r2', 'r1']);
   assert.deepEqual(await (await fetch(`${base}/routes/txs?agent=x`)).json(), []);
 });
+
+test('POST /compare는 고른 id와 나머지를 비교하고, 잘못된 본문은 400', async (t) => {
+  const base = await start(t);
+  const now = Date.now();
+  const mk = (id, route) => ({ id, name: route, route, start: now - 1000, elapsed: 10, status: 200, error: null, spans: [] });
+  await post(base, JSON.stringify({ agent: 'x', active: [], txs: [mk('s1', 'GET /slow'), mk('s2', 'GET /slow'), mk('f1', 'GET /fast')] }));
+  const cmp = (body) => fetch(`${base}/compare`, { method: 'POST', body });
+  const res = await (await cmp(JSON.stringify({ ids: ['s1', 's2'], since: now - 60000, agent: 'x' }))).json();
+  assert.equal(res.picked, 2);
+  assert.equal(res.rest, 1);
+  assert.deepEqual(res.rows[0], { attr: 'API', value: 'GET /slow', picked: 2, rest: 0, pickedPct: 100, restPct: 0 });
+  assert.equal((await cmp('{oops')).status, 400);
+  assert.equal((await cmp('null')).status, 400);
+  assert.equal((await cmp(JSON.stringify({ ids: 'x' }))).status, 400);
+  assert.equal((await cmp('x'.repeat(1024 * 1024 + 1))).status, 400);
+  // since·agent가 이상해도 기본값(0, 모든 앱)
+  assert.equal((await (await cmp(JSON.stringify({ ids: ['s1'], since: 'x', agent: 5 }))).json()).rest, 2);
+});
