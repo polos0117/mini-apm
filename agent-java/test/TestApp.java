@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 // 에이전트 테스트용 앱: 내장 Tomcat + Derby 메모리 DB. 인자는 포트 하나.
 public class TestApp {
   static final Logger log = LoggerFactory.getLogger(TestApp.class);
+  static final String PATTERN = "org.springframework.web.servlet.HandlerMapping.bestMatchingPattern";
 
   public static void main(String[] args) throws Exception {
     int port = Integer.parseInt(args[0]);
@@ -47,11 +48,16 @@ public class TestApp {
     tomcat.setBaseDir(new File(System.getProperty("java.io.tmpdir"), "apm-testapp-" + port).getPath());
     tomcat.getConnector(); // Tomcat 9는 이 호출로 기본 커넥터를 만든다
     Context ctx = tomcat.addContext("", null);
-    Tomcat.addServlet(ctx, "app", new HttpServlet() {
+    HttpServlet app = new HttpServlet() {
       @Override
       protected void doGet(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
         try {
-          switch (req.getServletPath()) {
+          // Spring이 넣는 매칭 패턴 흉내(테스트 앱에는 Spring이 없다)
+          String path = req.getServletPath();
+          if (path.startsWith("/items/")) req.setAttribute(PATTERN, "/items/{id}");
+          else if (path.startsWith("/other/")) req.setAttribute(PATTERN, "/error");
+          else if (path.startsWith("/files/")) req.setAttribute(PATTERN, "/**");
+          switch (path) {
             case "/ok":
               try (PreparedStatement p = db.prepareStatement(
                   "select name\n    from item\n   where id = ?\n     and name <> 'q\"\\'")) {
@@ -194,8 +200,12 @@ public class TestApp {
           throw new ServletException(e);
         }
       }
-    });
+    };
+    Tomcat.addServlet(ctx, "app", app);
     ctx.addServletMappingDecoded("/", "app");
+    Context sub = tomcat.addContext("/ctx", null); // 컨텍스트 경로가 있는 앱(KIPA 앱처럼)
+    Tomcat.addServlet(sub, "app", app);
+    sub.addServletMappingDecoded("/", "app");
     tomcat.start();
     System.out.println("READY");
     tomcat.getServer().await();

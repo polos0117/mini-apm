@@ -253,6 +253,20 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     assert.ok(tx.req.params.endsWith('...'));
   });
 
+  test('Spring 패턴이 실제 경로와 맞으면 route = 메서드 + 컨텍스트 경로 + 패턴', async () => {
+    assert.equal(await get('/items/7'), 200);
+    assert.equal((await waitTx('GET /items/7')).route, 'GET /items/{id}');
+    assert.equal(await get('/ctx/items/8'), 200);
+    assert.equal((await waitTx('GET /ctx/items/8')).route, 'GET /ctx/items/{id}');
+  });
+
+  test('패턴이 없거나, 와일드카드거나, 경로와 안 맞으면(/error) route는 null', async () => {
+    for (const p of ['/other/1', '/files/a', '/nopattern']) {
+      assert.equal(await get(p), 200);
+      assert.equal((await waitTx(`GET ${p}`)).route, null, p);
+    }
+  });
+
   test('정적 파일 요청은 기록하지 않는다', async () => {
     assert.equal(await get('/app.js'), 200);
     assert.equal(await get('/hello'), 200);

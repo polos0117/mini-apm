@@ -65,6 +65,7 @@ public final class Tracer {
     int chars; // 담은 구간 글자 수. MAX_BODY를 넘으면 어차피 못 보내므로 더 담지 않는다(앱 힙 보호)
     int level; // 지금 열린 메서드·매퍼 구간 수
     String ip, user, referer, params; // 요청 정보(RequestInfo가 끝날 때 채운다)
+    String route; // API별 통계의 묶음 이름(Spring 패턴). 없으면 수집 서버가 name으로 묶는다
     String firstError; // 앱이 남긴 첫 예외. 구간 한도로 예외 구간을 못 남겨도 요청 에러는 이것으로 정한다
     double elapsed;
     int status;
@@ -138,11 +139,12 @@ public final class Tracer {
   }
 
   // 요청이 끝날 때 RequestInfo가 정리해 넘긴다
-  public static void request(Tx tx, String ip, String user, String referer, String params) {
+  public static void request(Tx tx, String ip, String user, String referer, String params, String route) {
     tx.ip = ip;
     tx.user = user;
     tx.referer = cut(referer);
     tx.params = params;
+    tx.route = cut(route);
   }
 
   public static void remember(Object stmt, String sql) {
@@ -547,6 +549,8 @@ public final class Tracer {
     num(b, t.elapsed);
     b.append(",\"status\":").append(t.status).append(",\"error\":");
     str(b, t.error);
+    b.append(",\"route\":");
+    str(b, t.route);
     b.append(",\"req\":{\"ip\":");
     str(b, t.ip);
     b.append(",\"user\":");

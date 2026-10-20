@@ -13,11 +13,12 @@ public final class RequestInfo {
   static final String[] USER_GETTERS = {"getUserId", "getUsername", "getLoginId", "getId"};
   static final int MAX_VALUE = 200;
   static final int MAX_PARAMS = 2000;
+  static final String PATTERN_ATTR = "org.springframework.web.servlet.HandlerMapping.bestMatchingPattern";
 
   // 무엇이 실패해도 앱 응답과 트랜잭션 종료에 영향이 없게 모두 삼킨다
   public static void collect(Tracer.Tx tx, HttpServletRequest r) {
     if (tx == null) return;
-    String ip = null, user = null, referer = null, params = null;
+    String ip = null, user = null, referer = null, params = null, route = null;
     try {
       ip = ip(r);
       referer = r.getHeader("Referer");
@@ -26,7 +27,35 @@ public final class RequestInfo {
     } catch (Throwable ignored) {
       // 세션 무효화 등
     }
-    Tracer.request(tx, ip, user, referer, params);
+    try {
+      route = route(r);
+    } catch (Throwable ignored) {
+      // 패턴을 못 읽으면 주소 그대로 묶인다
+    }
+    Tracer.request(tx, ip, user, referer, params, route);
+  }
+
+  // API별 통계의 묶음 이름. Spring이 고른 패턴이 실제 경로와 맞을 때만 "GET /ctx/qna/{procsCode}/list", 아니면 null
+  static String route(HttpServletRequest r) {
+    Object p = r.getAttribute(PATTERN_ATTR); // String 또는 Spring 5.3 PathPattern(toString이 패턴)
+    if (p == null) return null;
+    String pattern = p.toString();
+    String ctx = r.getContextPath() == null ? "" : r.getContextPath();
+    String uri = r.getRequestURI();
+    if (uri == null || !uri.startsWith(ctx)) return null;
+    return matches(pattern, uri.substring(ctx.length())) ? r.getMethod() + " " + ctx + pattern : null;
+  }
+
+  // 와일드카드(/** 등)가 없고, 조각 수가 같고, 조각마다 글자가 같거나 {변수}. 에러로 /error에 넘어간 요청도 여기서 걸러진다
+  static boolean matches(String pattern, String path) {
+    if (pattern.indexOf('*') >= 0 || pattern.indexOf('?') >= 0) return false;
+    String[] a = pattern.split("/"), b = path.split("/");
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      boolean var = a[i].startsWith("{") && a[i].endsWith("}");
+      if (!var && !a[i].equals(b[i])) return false;
+    }
+    return true;
   }
 
   static String ip(HttpServletRequest r) {
