@@ -13,8 +13,8 @@ MyBatis 3.5.6, Spring Security 5.4.5, 세션 속성 `loginUser`(`LoginUser`).
 
 - 모든 Java 구간에 `depth`(정수, 0부터)를 더한다. 스레드의 트랜잭션에 "지금 열린 메서드·매퍼 구간 수"(`Tx.level`)를 두고,
   구간을 만들 때의 `level`이 그 구간의 `depth`다.
-- 메서드·매퍼 구간은 들어갈 때 열고(`level++`), 나올 때 닫는다(`level--`). 구간 수·글자 수 한도로 구간을 못 만들어도
-  `level`은 짝을 맞춰 올리고 내린다.
+- 메서드·매퍼 구간은 들어갈 때 열고(`level++`), 나올 때 닫는다(`level--`). 구간을 만들었을 때만 올리고 그 구간을 닫을 때 내린다
+  (한도에 걸려 구간을 못 만들면 그 뒤 구간도 모두 못 만들므로 들여쓰기가 어긋날 일이 없다).
 - 구간은 지금처럼 시작 순서대로 `spans`에 쌓는다. 그래서 목록 순서 + `depth`로 들여쓴 나무가 된다.
 - Node 에이전트는 바꾸지 않는다(`depth` 없음 = 0).
 
@@ -32,7 +32,7 @@ MyBatis 3.5.6, Spring Security 5.4.5, 세션 속성 `loginUser`(`LoginUser`).
 
 ## 3. 매퍼 구간(`type: "mapper"`)
 
-- 계측 대상: `org.apache.ibatis.executor.Executor`를 구현한 클래스(인터페이스·추상 제외)의
+- 계측 대상: `org.apache.ibatis.executor.Executor`를 구현한 클래스(인터페이스 제외. `BaseExecutor`처럼 추상 클래스라도 몸체가 있는 메서드는 포함)의
   `query(MappedStatement, Object, RowBounds, ResultHandler)`(인자 4개)와 `update(MappedStatement, Object)`.
   `CachingExecutor`가 `SimpleExecutor`에 넘기는 식으로 겹쳐 불리므로 스레드별 깊이로 바깥 한 번만 기록한다.
 - `text` = 첫 인자 `MappedStatement.getId()`에서 namespace의 단순 이름 + `.` + id
