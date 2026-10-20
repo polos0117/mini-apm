@@ -1,8 +1,18 @@
 package apm;
 
+import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
+import static net.bytebuddy.matcher.ElementMatchers.isConstructor;
+import static net.bytebuddy.matcher.ElementMatchers.isDeclaredBy;
+import static net.bytebuddy.matcher.ElementMatchers.isGetter;
 import static net.bytebuddy.matcher.ElementMatchers.isInterface;
+import static net.bytebuddy.matcher.ElementMatchers.isPublic;
+import static net.bytebuddy.matcher.ElementMatchers.isSetter;
+import static net.bytebuddy.matcher.ElementMatchers.isStatic;
 import static net.bytebuddy.matcher.ElementMatchers.isSubTypeOf;
+import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
+import static net.bytebuddy.matcher.ElementMatchers.nameContains;
+import static net.bytebuddy.matcher.ElementMatchers.nameEndsWith;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.namedOneOf;
@@ -25,6 +35,7 @@ public final class Agent {
     Tracer.collector = env("APM_COLLECTOR", Tracer.collector);
     Tracer.agent = env("APM_AGENT", Tracer.agent);
     Tracer.appPackage = env("APM_APP_PACKAGE", mainPackage(System.getProperty("sun.java.command")));
+    RequestInfo.userAttr = env("APM_USER_ATTR", RequestInfo.userAttr);
     long interval = 1000;
     try {
       interval = Long.parseLong(env("APM_INTERVAL", "1000"));
@@ -39,13 +50,14 @@ public final class Agent {
       public void onError(String type, ClassLoader loader, JavaModule module, boolean loaded, Throwable t) {
         // ponytail: 대상인지 이름으로만 거른다. 하위 타입 판정 중 무관한 클래스에서 나는 오류는 숨긴다.
         if (type.endsWith("StandardHostValve") || type.contains("Statement") || type.contains("Connection")
-            || type.endsWith("RealCall")) {
+            || type.endsWith("RealCall") || type.endsWith("Executor") || type.equals("ch.qos.logback.classic.Logger")
+            || type.equals("java.lang.Throwable")) {
           System.err.println("[apm] 계측 실패: " + type + " " + t);
         }
       }
     };
 
-    new AgentBuilder.Default()
+    AgentBuilder main = new AgentBuilder.Default()
         .with(errors)
         .type(named("org.apache.catalina.core.StandardHostValve"))
         .transform((builder, type, loader, module) ->
@@ -67,9 +79,30 @@ public final class Agent {
         .type(namedOneOf("okhttp3.RealCall", "okhttp3.internal.connection.RealCall"))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(OkHttpAdvice.class).on(named("execute").and(takesArguments(0)))))
-        .installOn(inst);
+        // Logback: 레벨 판단을 통과한 로그 이벤트가 appender로 가기 직전
+        .type(named("ch.qos.logback.classic.Logger"))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(LogAdvice.class).on(named("callAppenders").and(takesArguments(1)))))
+        // MyBatis: 모든 매퍼 호출이 지나는 Executor. BaseExecutor처럼 추상 클래스도 몸체 있는 메서드는 포함
+        .type(hasSuperType(named("org.apache.ibatis.executor.Executor")).and(not(isInterface())))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(MapperAdvice.class).on(not(isAbstract()).and(
+                named("query").and(takesArguments(4)).or(named("update").and(takesArguments(2)))))));
+    // 앱 메서드 흐름: 앱 패키지의 *Controller·*ServiceImpl·*Service. $가 든 이름(CGLIB 프록시, 안쪽 클래스)은 빼서 한 호출이 한 줄.
+    // getter·setter는 서비스에서만 뺀다. 컨트롤러의 getXxx()는 @GetMapping 요청 처리 메서드일 수 있다.
+    if (Tracer.appPackage != null) {
+      main = main.type(nameStartsWith(Tracer.appPackage)
+              .and(nameEndsWith("Controller").or(nameEndsWith("ServiceImpl")).or(nameEndsWith("Service")))
+              .and(not(nameContains("$"))).and(not(isInterface())))
+          .transform((builder, type, loader, module) ->
+              builder.visit(Advice.to(MethodAdvice.class).on(isPublic().and(not(isStatic())).and(not(isAbstract()))
+                  .and(not(isConstructor())).and(not(isSynthetic()))
+                  .and(not(isGetter().or(isSetter())).or(isDeclaredBy(nameEndsWith("Controller"))))
+                  .and(not(namedOneOf("toString", "equals", "hashCode"))))));
+    }
+    main.installOn(inst);
 
-    // JDK의 HttpURLConnection은 부트스트랩 로더가 올린다. 기본 무시 규칙(부트스트랩 제외)을 풀고 이름이 같은 이 클래스 하나만,
+    // JDK 클래스(HttpURLConnection, Throwable)는 부트스트랩 로더가 올린다. 기본 무시 규칙(부트스트랩 제외)을 풀고 이름이 같은 클래스만,
     // 이미 로드됐어도 다시 변환한다. 위 빌더와 나눠서 SQL 쪽 매칭(MyBatis 부트스트랩 프록시 제외)은 그대로 둔다.
     // Advice가 부르는 Tracer는 Boot-Class-Path(mini-apm-boot.jar)로 부트스트랩에서 보인다.
     new AgentBuilder.Default()
@@ -81,6 +114,10 @@ public final class Agent {
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(HttpAdvice.class).on(named("getInputStream").and(takesArguments(0))))
                 .visit(Advice.to(ConnectAdvice.class).on(namedOneOf("connect", "getOutputStream").and(takesArguments(0)))))
+        // 로거를 거치지 않는 e.printStackTrace()
+        .type(named("java.lang.Throwable"))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(PrintAdvice.class).on(named("printStackTrace").and(takesArguments(0)))))
         .installOn(inst);
 
     Tracer.startSender(interval);

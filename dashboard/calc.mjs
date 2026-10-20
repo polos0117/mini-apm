@@ -15,3 +15,14 @@ const STEPS = [1000, 3000, 5000, 10000];
 export function yMax(maxElapsed) {
   return STEPS.find((s) => s >= maxElapsed) ?? Math.ceil(maxElapsed / 1000) * 1000;
 }
+
+// 앱 자체 처리 시간: 전체 − 맨 바깥 구간들(depth 0 또는 없음). 안쪽 구간은 바깥 구간 시간에 이미 들어 있다.
+export function selfTime(elapsed, spans) {
+  return Math.max(0, elapsed - spans.filter((s) => !s.depth).reduce((sum, s) => sum + s.elapsed, 0));
+}
+
+// 끊김 기준(초): 1~600 정수만, 그 밖이면 10
+export function downSec(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 600 ? n : 10;
+}

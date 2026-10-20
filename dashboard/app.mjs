@@ -1,33 +1,84 @@
-import { pickInRect, yMax } from './calc.mjs';
+import { createAlerts } from './alerts.mjs';
+import { downSec, pickInRect, selfTime, yMax } from './calc.mjs';
 
 const WINDOW_MS = 5 * 60 * 1000;            // X-View에 보이는 시간
 const PAD = { l: 52, r: 24, t: 8, b: 22 };   // 축 글자 자리
 const MAX_ROWS = 200;                        // ponytail: 목록은 200줄까지, 더 필요하면 페이지 나누기
+const MAX_ERRORS = 50;                       // 최근 에러 패널 줄 수
+const MAX_BANNER = 5;                        // 빨간 줄에 보이는 경보 수
+const SHAPES = ['●', '▲', '■', '◆'];         // 앱마다 점 모양(agents 순서로 반복)
+const ZERO = { tps: 0, avg: 0, p95: 0, errors: 0 };
+const KIND = { method: '메서드', mapper: '매퍼', sql: 'SQL', http: '외부', exception: '예외' }; // 상세의 구간 종류
+const TITLE = document.title;
 const COLOR = { ok: '#4ea1ff', err: '#ff5c5c', grid: '#2a3440', dim: '#8593a3', drag: '#ffcc4d' };
 
 const points = new Map(); // id → 점 (재연결 때 겹쳐 와도 한 번만)
 let drag = null;          // 끌고 있는 사각형(캔버스 좌표)
 let scale = null;         // 마지막으로 그린 축: 좌표 ↔ 값 변환
+let last = null;          // 마지막으로 받은 메시지(stats, agentStats, agents, active)
+let errKey = '';          // 최근 에러 패널에 그린 점 id들. 같으면 다시 만들지 않는다(클릭이 사라지지 않게)
+let recent = [];          // 빨간 줄에 보일 경보 문구(최근 MAX_BANNER개)
+let unacked = 0;          // 확인 안 한 경보 수
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('xview');
 const ctx = canvas.getContext('2d');
 
+// 설정은 이 브라우저에만 기억한다. 저장소가 막혀 있으면 기본값으로 동작한다.
+function load(key, def) {
+  try {
+    return localStorage.getItem(key) ?? def;
+  } catch {
+    return def;
+  }
+}
+function save(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // 이번 화면에서만 유지
+  }
+}
+
+let selected = load('apm.app', ''); // '' = 전체
+const opts = {
+  errors: load('apm.errors', '1') === '1',
+  down: load('apm.down', '1') === '1',
+  downMs: downSec(load('apm.downSec', '10')) * 1000,
+};
+const alerts = createAlerts();
+
+const visible = (p) => !selected || p.agent === selected;
+const tag = (agent) => (selected ? '' : `[${agent}] `);
+const shapeOf = (agent) => SHAPES[Math.max(0, (last?.agents ?? []).findIndex((a) => a.name === agent)) % SHAPES.length];
+
 // ---- 실시간 수신 ----
 
 const es = new EventSource('/stream');
-es.onopen = () => ($('status').textContent = '');
+es.onopen = () => {
+  $('status').textContent = '';
+  alerts.reset(); // 다시 연결되면 첫 메시지는 지난 5분치라 경보 기준선으로만 쓴다
+};
 es.onerror = () => ($('status').textContent = '(연결 끊김 — 다시 연결하는 중)');
 es.onmessage = (e) => {
   const msg = JSON.parse(e.data);
   for (const p of msg.points) points.set(p.id, p);
   const cutoff = Date.now() - WINDOW_MS;
   for (const [id, p] of points) if (p.t < cutoff) points.delete(id);
-  showStats(msg.stats);
-  showActive(msg.active);
-  draw();
+  last = msg;
+  raise(alerts.check(msg, Date.now(), opts));
+  render();
 };
 addEventListener('resize', draw);
+
+function render() {
+  if (!last) return;
+  showApps();
+  showStats(selected ? last.agentStats[selected] ?? ZERO : last.stats);
+  showActive(last.active.filter(visible));
+  showErrors();
+  draw();
+}
 
 // ---- X-View ----
 
@@ -69,11 +120,11 @@ function draw() {
   ctx.textBaseline = 'top';
   for (let m = 0; m <= 5; m++) ctx.fillText(m ? `-${m}분` : '지금', scale.x(now - m * 60000), h - PAD.b + 4);
 
-  // 에러 점이 위에 오도록 정상 점을 먼저 그린다
+  // 에러 점이 위에 오도록 정상 점을 먼저 그린다. 모양은 앱마다 다르다.
   for (const error of [false, true]) {
     ctx.fillStyle = error ? COLOR.err : COLOR.ok;
     for (const p of points.values()) {
-      if (p.error === error) ctx.fillRect(scale.x(p.t) - 1.5, scale.y(p.elapsed) - 1.5, 3, 3);
+      if (p.error === error && visible(p)) mark(shapeOf(p.agent), scale.x(p.t), scale.y(p.elapsed));
     }
   }
 
@@ -81,6 +132,23 @@ function draw() {
     ctx.strokeStyle = COLOR.drag;
     ctx.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0);
   }
+}
+
+function mark(shape, x, y) {
+  const r = 2.5;
+  ctx.beginPath();
+  if (shape === '●') ctx.arc(x, y, r, 0, 2 * Math.PI);
+  else if (shape === '▲') {
+    ctx.moveTo(x, y - r - 0.5);
+    ctx.lineTo(x + r + 0.5, y + r);
+    ctx.lineTo(x - r - 0.5, y + r);
+  } else if (shape === '◆') {
+    ctx.moveTo(x, y - r - 1);
+    ctx.lineTo(x + r + 1, y);
+    ctx.lineTo(x, y + r + 1);
+    ctx.lineTo(x - r - 1, y);
+  } else ctx.rect(x - r, y - r, 2 * r, 2 * r);
+  ctx.fill();
 }
 
 const pos = (e) => {
@@ -107,9 +175,126 @@ canvas.addEventListener('pointerup', () => {
   const [x0, x1] = widen(drag.x0, drag.x1);
   const [y0, y1] = widen(drag.y0, drag.y1);
   drag = null;
-  showPicked(pickInRect([...points.values()], { t0: scale.t(x0), t1: scale.t(x1), e0: scale.ms(y0), e1: scale.ms(y1) }));
+  showPicked(pickInRect([...points.values()].filter(visible), { t0: scale.t(x0), t1: scale.t(x1), e0: scale.ms(y0), e1: scale.ms(y1) }));
   draw();
 });
+
+// ---- 앱 버튼 ----
+
+// 버튼은 앱 목록이 바뀔 때만 새로 만든다(1초마다 새로 만들면 누르는 중에 사라진다).
+function showApps() {
+  const box = $('apps');
+  const names = ['', ...last.agents.map((a) => a.name)];
+  if (box.children.length !== names.length || names.some((n, i) => box.children[i].dataset.app !== n)) {
+    box.replaceChildren(...names.map((n) => {
+      const b = document.createElement('button');
+      b.dataset.app = n;
+      b.textContent = n || '전체';
+      b.onclick = () => {
+        selected = n;
+        save('apm.app', n);
+        $('picked').replaceChildren();
+        render();
+      };
+      return b;
+    }));
+  }
+  for (const b of box.children) {
+    const a = last.agents.find((x) => x.name === b.dataset.app);
+    b.classList.toggle('on', b.dataset.app === selected);
+    b.classList.toggle('down', Boolean(a && a.ago > opts.downMs));
+  }
+  $('legend').textContent = selected ? '' : last.agents.map((a) => `${shapeOf(a.name)} ${a.name}`).join('   ');
+}
+
+// ---- 최근 에러 ----
+
+function showErrors() {
+  const list = [...points.values()].filter((p) => p.error && visible(p)).sort((a, b) => b.t - a.t).slice(0, MAX_ERRORS);
+  const key = list.map((p) => p.id).join(' ');
+  if (key === errKey) return;
+  errKey = key;
+  if (list.length === 0) return $('errlist').replaceChildren('없음');
+  const table = document.createElement('table');
+  for (const p of list) {
+    const tr = row('td', [new Date(p.t).toLocaleTimeString(), p.agent, p.name, p.msg ?? '']);
+    tr.className = 'row err';
+    for (const td of [tr.children[1], tr.children[2], tr.children[3]]) {
+      td.className = 'ell';
+      td.title = td.textContent;
+    }
+    tr.onclick = () => showDetail(p.id);
+    table.append(tr);
+  }
+  $('errlist').replaceChildren(table);
+}
+
+// ---- 경보 ----
+
+function raise(list) {
+  if (list.length === 0) return;
+  const at = new Date().toLocaleTimeString();
+  for (const a of list) {
+    recent.push(`${at} ${a.text}`);
+    unacked++;
+    // 대시보드를 보고 있으면 빨간 줄로 충분하다
+    if (window.Notification?.permission === 'granted' && !document.hasFocus()) new Notification('미니 APM', { body: a.text });
+  }
+  recent = recent.slice(-MAX_BANNER);
+  showAlerts();
+}
+
+function showAlerts() {
+  $('alertbar').hidden = unacked === 0;
+  $('alerts').replaceChildren(...[...recent].reverse().map((t) => {
+    const li = document.createElement('li');
+    li.textContent = t;
+    li.title = t;
+    return li;
+  }));
+  document.title = unacked ? `(⚠${unacked}) ${TITLE}` : TITLE;
+}
+
+$('ack').onclick = () => {
+  recent = [];
+  unacked = 0;
+  showAlerts();
+};
+
+// ---- 설정 ----
+
+$('optErrors').checked = opts.errors;
+$('optDown').checked = opts.down;
+$('optDownSec').value = opts.downMs / 1000;
+$('optErrors').onchange = (e) => {
+  opts.errors = e.target.checked;
+  save('apm.errors', opts.errors ? '1' : '0');
+};
+$('optDown').onchange = (e) => {
+  opts.down = e.target.checked;
+  save('apm.down', opts.down ? '1' : '0');
+};
+$('optDownSec').onchange = (e) => {
+  const sec = downSec(e.target.value);
+  e.target.value = sec;
+  opts.downMs = sec * 1000;
+  save('apm.downSec', String(sec));
+  render();
+};
+
+function showNotify() {
+  const b = $('notify');
+  if (!('Notification' in window)) return (b.hidden = true);
+  const p = Notification.permission;
+  b.hidden = false;
+  b.disabled = p !== 'default';
+  b.textContent = p === 'granted' ? '알림 켜짐' : p === 'denied' ? '알림 차단됨(브라우저 설정)' : '알림 켜기';
+}
+$('notify').onclick = async () => {
+  await Notification.requestPermission();
+  showNotify();
+};
+showNotify();
 
 // ---- 표 ----
 
@@ -133,10 +318,10 @@ function showActive(list) {
   // 좁은 패널이라 ① 이름·시간 ② 현재 위치 ③ 마지막 호출을 각각 한 줄로. 넘치면 …로 자르고 전체는 툴팁으로.
   for (const a of list) {
     const level = a.elapsed >= 3000 ? 'err' : a.elapsed >= 1000 ? 'warn' : '';
-    const tr = row('td', [a.name, `${(a.elapsed / 1000).toFixed(1)}초`]);
+    const tr = row('td', [tag(a.agent) + a.name, `${(a.elapsed / 1000).toFixed(1)}초`]);
     tr.className = level;
     tr.children[0].className = 'ell';
-    tr.children[0].title = a.name;
+    tr.children[0].title = tag(a.agent) + a.name;
     tr.children[1].className = 'num';
     table.append(tr);
     for (const text of [a.where, a.lastSpan]) {
@@ -156,7 +341,7 @@ function showPicked(list) {
   const table = $('picked');
   table.replaceChildren(row('th', ['끝난 시각', '이름', '응답시간(ms)', '상태']));
   for (const p of list.slice(0, MAX_ROWS)) {
-    const tr = row('td', [new Date(p.t).toLocaleTimeString(), p.name, Math.round(p.elapsed), p.error ? '에러' : '정상']);
+    const tr = row('td', [new Date(p.t).toLocaleTimeString(), tag(p.agent) + p.name, Math.round(p.elapsed), p.error ? '에러' : '정상']);
     tr.className = p.error ? 'row err' : 'row';
     tr.children[2].className = 'num';
     tr.onclick = () => showDetail(p.id);
@@ -173,26 +358,35 @@ async function showDetail(id) {
   if (!res.ok) return (box.textContent = '이미 정리된 트랜잭션입니다(10분 경과).');
   const tx = await res.json();
   const total = tx.elapsed || 1;
-  const self = Math.max(0, tx.elapsed - tx.spans.reduce((sum, s) => sum + s.elapsed, 0));
+  const self = selfTime(tx.elapsed, tx.spans);
 
   const head = document.createElement('p');
   head.textContent = `${tx.name}   ${Math.round(tx.elapsed)}ms   상태 ${tx.status}${tx.error ? `   — ${tx.error}` : ''}`;
   if (tx.error) head.className = 'err';
+  // 누가 어느 화면에서 무엇을 보냈나(Java 에이전트만). 값이 있는 것만
+  const r = tx.req ?? {};
+  const info = [['사용자', r.user], ['IP', r.ip], ['화면', r.referer], ['파라미터', r.params]]
+    .filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join('  ·  ');
+  const req = document.createElement('p');
+  req.className = 'req';
+  req.textContent = info;
 
   const table = document.createElement('table');
   for (const s of tx.spans) {
     const label = s.error ? `${s.text}  (${s.error})` : s.text;
-    table.append(spanRow(s.type === 'sql' ? 'SQL' : '외부', label, s.offset / total, s.elapsed, s.elapsed / total, s.error));
+    table.append(spanRow(KIND[s.type] ?? s.type, label, s.offset / total, s.elapsed, s.elapsed / total, s.error,
+      s.depth ?? 0, s.type === 'method' || s.type === 'mapper'));
   }
   if (tx.droppedSpans) table.append(row('td', ['…', `호출 ${tx.droppedSpans}개 생략(트랜잭션당 1000개까지 기록, 생략분 시간은 아래에 포함)`]));
-  table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null));
-  box.replaceChildren(head, table);
+  table.append(spanRow('앱', '앱 자체 처리', null, self, 0, null, 0, false));
+  box.replaceChildren(...(info ? [head, req, table] : [head, table]));
 }
 
-// left·width는 전체 대비 비율(0~1). left가 null이면 막대 없이 시간만.
-function spanRow(kind, text, left, elapsed, width, error) {
+// left·width는 전체 대비 비율(0~1). left가 null이면 막대 없이 시간만. depth만큼 들여쓰고, dim이면 막대를 흐리게(메서드·매퍼).
+function spanRow(kind, text, left, elapsed, width, error, depth, dim) {
   const tr = row('td', [kind, text]);
   tr.children[1].className = 'text';
+  tr.children[1].style.paddingLeft = `${8 + depth * 16}px`;
   if (error) tr.className = 'err';
   const barCell = document.createElement('td');
   const bar = document.createElement('div');
@@ -201,7 +395,7 @@ function spanRow(kind, text, left, elapsed, width, error) {
     const fill = document.createElement('i');
     fill.style.left = `${left * 100}%`;
     fill.style.width = `${Math.max(0.5, width * 100)}%`;
-    if (error) fill.className = 'err';
+    fill.className = error ? 'err' : dim ? 'dim' : '';
     bar.append(fill);
   }
   barCell.append(bar);

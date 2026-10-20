@@ -15,8 +15,8 @@ test('받은 트랜잭션을 id로 찾고 점으로 돌려준다', () => {
   const s = createStore();
   const added = s.ingest('a', [tx('1', 1000, 50), tx('2', 1000, 70, 'boom')], [], 2000);
   assert.deepEqual(added, [
-    { id: '1', name: 'GET /a', t: 1050, elapsed: 50, error: false },
-    { id: '2', name: 'GET /a', t: 1070, elapsed: 70, error: true },
+    { id: '1', name: 'GET /a', t: 1050, elapsed: 50, error: false, agent: 'a', msg: null },
+    { id: '2', name: 'GET /a', t: 1070, elapsed: 70, error: true, agent: 'a', msg: 'boom' },
   ]);
   assert.equal(s.get('2').error, 'boom');
   assert.equal(s.get('x'), null);
@@ -53,4 +53,46 @@ test('5초간 소식 없는 에이전트의 처리 중 목록은 빠진다', () 
   s.ingest('b', [], [{ id: 'y', name: 'GET /b', elapsed: 900, lastSpan: null }], 4000);
   assert.deepEqual(s.active(5000).map((t) => t.id), ['y', 'x']);
   assert.deepEqual(s.active(6000).map((t) => t.id), ['y']);
+});
+
+test('에이전트 이름을 정리해 트랜잭션·점·처리 중 항목에 붙인다', () => {
+  const s = createStore();
+  s.ingest('  evl ', [tx('1', 0, 5)], [{ id: 'x', name: 'GET /a', elapsed: 1, lastSpan: null }], 0);
+  s.ingest(42, [tx('2', 0, 5)], [], 0);
+  s.ingest('   ', [tx('3', 0, 5)], [], 0);
+  s.ingest('a'.repeat(41), [tx('4', 0, 5)], [], 0);
+  assert.equal(s.get('1').agent, 'evl');
+  assert.equal(s.get('2').agent, 'unknown');
+  assert.equal(s.get('3').agent, 'unknown');
+  assert.equal(s.get('4').agent, 'a'.repeat(40));
+  assert.deepEqual(s.points(0).map((p) => p.agent), ['evl', 'unknown', 'unknown', 'a'.repeat(40)]);
+  assert.deepEqual(s.active(0).map((a) => [a.id, a.agent]), [['x', 'evl']]);
+});
+
+test('점의 msg는 에러 문자열 200자까지, 에러 없으면 null', () => {
+  const s = createStore();
+  s.ingest('a', [tx('1', 0, 5), tx('2', 0, 5, 'x'.repeat(250))], [], 0);
+  const [ok, bad] = s.points(0);
+  assert.equal(ok.msg, null);
+  assert.equal(bad.msg, 'x'.repeat(200));
+});
+
+test('agentStats는 앱별로 나누고, 그 1초에 없는 앱은 0들', () => {
+  const s = createStore();
+  s.ingest('a', [tx('1', 1000, 100)], [], 0);
+  s.ingest('b', [tx('2', 1500, 300, 'e')], [], 0);
+  s.ingest('c', [], [], 0);
+  assert.deepEqual(s.agentStats(1000), {
+    a: { tps: 1, avg: 100, p95: 100, errors: 0 },
+    b: { tps: 1, avg: 300, p95: 300, errors: 1 },
+    c: { tps: 0, avg: 0, p95: 0, errors: 0 },
+  });
+});
+
+test('agents는 처음 보낸 순서와 마지막 소식 뒤 지난 시간, 오래된 앱도 남는다', () => {
+  const s = createStore();
+  s.ingest('b', [], [], 1000);
+  s.ingest('a', [], [], 2000);
+  s.ingest('b', [], [], 3000);
+  assert.deepEqual(s.agents(60000), [{ name: 'b', ago: 57000 }, { name: 'a', ago: 58000 }]);
 });
