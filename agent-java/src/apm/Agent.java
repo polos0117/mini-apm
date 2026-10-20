@@ -39,7 +39,8 @@ public final class Agent {
       public void onError(String type, ClassLoader loader, JavaModule module, boolean loaded, Throwable t) {
         // ponytail: 대상인지 이름으로만 거른다. 하위 타입 판정 중 무관한 클래스에서 나는 오류는 숨긴다.
         if (type.endsWith("StandardHostValve") || type.contains("Statement") || type.contains("Connection")
-            || type.endsWith("RealCall")) {
+            || type.endsWith("RealCall") || type.endsWith("Executor") || type.equals("ch.qos.logback.classic.Logger")
+            || type.equals("java.lang.Throwable")) {
           System.err.println("[apm] 계측 실패: " + type + " " + t);
         }
       }
@@ -67,9 +68,13 @@ public final class Agent {
         .type(namedOneOf("okhttp3.RealCall", "okhttp3.internal.connection.RealCall"))
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(OkHttpAdvice.class).on(named("execute").and(takesArguments(0)))))
+        // Logback: 레벨 판단을 통과한 로그 이벤트가 appender로 가기 직전
+        .type(named("ch.qos.logback.classic.Logger"))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(LogAdvice.class).on(named("callAppenders").and(takesArguments(1)))))
         .installOn(inst);
 
-    // JDK의 HttpURLConnection은 부트스트랩 로더가 올린다. 기본 무시 규칙(부트스트랩 제외)을 풀고 이름이 같은 이 클래스 하나만,
+    // JDK 클래스(HttpURLConnection, Throwable)는 부트스트랩 로더가 올린다. 기본 무시 규칙(부트스트랩 제외)을 풀고 이름이 같은 클래스만,
     // 이미 로드됐어도 다시 변환한다. 위 빌더와 나눠서 SQL 쪽 매칭(MyBatis 부트스트랩 프록시 제외)은 그대로 둔다.
     // Advice가 부르는 Tracer는 Boot-Class-Path(mini-apm-boot.jar)로 부트스트랩에서 보인다.
     new AgentBuilder.Default()
@@ -81,6 +86,10 @@ public final class Agent {
         .transform((builder, type, loader, module) ->
             builder.visit(Advice.to(HttpAdvice.class).on(named("getInputStream").and(takesArguments(0))))
                 .visit(Advice.to(ConnectAdvice.class).on(namedOneOf("connect", "getOutputStream").and(takesArguments(0)))))
+        // 로거를 거치지 않는 e.printStackTrace()
+        .type(named("java.lang.Throwable"))
+        .transform((builder, type, loader, module) ->
+            builder.visit(Advice.to(PrintAdvice.class).on(named("printStackTrace").and(takesArguments(0)))))
         .installOn(inst);
 
     Tracer.startSender(interval);

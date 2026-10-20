@@ -18,9 +18,13 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.apache.catalina.Context;
 import org.apache.catalina.startup.Tomcat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 // 에이전트 테스트용 앱: 내장 Tomcat + Derby 메모리 DB. 인자는 포트 하나.
 public class TestApp {
+  static final Logger log = LoggerFactory.getLogger(TestApp.class);
+
   public static void main(String[] args) throws Exception {
     int port = Integer.parseInt(args[0]);
     String stub = args.length > 1 ? args[1] : ""; // 외부 호출 대상(Node 테스트의 가짜 서버)
@@ -30,6 +34,7 @@ public class TestApp {
       s.execute("insert into item values (1, 'a')");
     }
 
+    log.error("기동 중 에러"); // 요청 밖: 기록되면 안 된다
     Tomcat tomcat = new Tomcat();
     tomcat.setPort(port);
     tomcat.setBaseDir(new File(System.getProperty("java.io.tmpdir"), "apm-testapp-" + port).getPath());
@@ -123,6 +128,26 @@ public class TestApp {
                   // 연결 실패
                 }
               }
+              break;
+            case "/caught": // 잡아서 로그만 남기고 200
+              try {
+                throw new IllegalStateException("재고 없음");
+              } catch (IllegalStateException e) {
+                log.error("주문 저장 실패", e);
+              }
+              break;
+            case "/errlog":
+              log.error("결재 실패 id={}", 7);
+              break;
+            case "/printed":
+              new IllegalArgumentException("잘못된 값").printStackTrace();
+              break;
+            case "/warn":
+              log.warn("경고", new IllegalStateException("w"));
+              break;
+            case "/twice":
+              log.error("첫째", new RuntimeException("a"));
+              log.error("둘째", new RuntimeException("b"));
               break;
             case "/slow":
               Thread.sleep(1500);

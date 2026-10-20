@@ -19,6 +19,10 @@ const APP_CP = [
   repoJar('jakarta.annotation', 'jakarta.annotation-api', '1.3.5'), // 로컬 저장소에 tomcat-annotations-api는 pom뿐이다
   repoJar('com.squareup.okhttp3', 'okhttp', '3.14.9'),
   repoJar('com.squareup.okio', 'okio', '1.17.2'),
+  repoJar('ch.qos.logback', 'logback-classic', '1.2.3'),
+  repoJar('ch.qos.logback', 'logback-core', '1.2.3'),
+  repoJar('org.slf4j', 'slf4j-api', '1.7.30'),
+  repoJar('org.mybatis', 'mybatis', '3.5.6'),
   path.join(JAVA_HOME, 'db', 'lib', 'derby.jar'),
 ];
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-java-'));
@@ -126,6 +130,47 @@ describe('Java 에이전트', { skip: JAVA_OK ? false : `JDK 없음: ${JAVA_HOME
     const tx = await waitTx('GET /boom');
     assert.equal(tx.status, 500);
     assert.equal(tx.error, 'HTTP 500');
+  });
+
+  const exceptions = (tx) => tx.spans.filter((s) => s.type === 'exception').map((s) => [s.text, s.error, s.depth]);
+
+  test('잡아서 ERROR 로그로 남긴 예외는 200이어도 에러이고 예외 구간이 남는다', async () => {
+    assert.equal(await get('/caught'), 200);
+    const tx = await waitTx('GET /caught');
+    assert.equal(tx.status, 200);
+    assert.equal(tx.error, 'IllegalStateException: 재고 없음');
+    assert.deepEqual(exceptions(tx), [['주문 저장 실패', 'IllegalStateException: 재고 없음', 0]]);
+    assert.equal(tx.spans[0].elapsed, 0);
+  });
+
+  test('예외 없는 ERROR 로그는 메시지가 에러', async () => {
+    assert.equal(await get('/errlog'), 200);
+    const tx = await waitTx('GET /errlog');
+    assert.equal(tx.error, '결재 실패 id=7');
+    assert.deepEqual(exceptions(tx), [['결재 실패 id=7', '결재 실패 id=7', 0]]);
+  });
+
+  test('printStackTrace()도 에러', async () => {
+    assert.equal(await get('/printed'), 200);
+    const tx = await waitTx('GET /printed');
+    assert.equal(tx.error, 'IllegalArgumentException: 잘못된 값');
+    assert.deepEqual(exceptions(tx), [['printStackTrace()', 'IllegalArgumentException: 잘못된 값', 0]]);
+  });
+
+  test('WARN 로그는 에러가 아니다', async () => {
+    assert.equal(await get('/warn'), 200);
+    const tx = await waitTx('GET /warn');
+    assert.equal(tx.error, null);
+    assert.deepEqual(tx.spans, []);
+  });
+
+  test('예외가 여럿이면 첫 번째가 요청 에러, 요청 밖 ERROR 로그는 어디에도 없다', async () => {
+    assert.equal(await get('/twice'), 200);
+    const tx = await waitTx('GET /twice');
+    assert.equal(tx.error, 'RuntimeException: a');
+    assert.deepEqual(exceptions(tx).map((e) => e[1]), ['RuntimeException: a', 'RuntimeException: b']);
+    const all = store.points(0).map((p) => store.get(p.id));
+    assert.ok(all.every((t) => t.spans.every((s) => s.text !== '기동 중 에러')));
   });
 
   test('정적 파일 요청은 기록하지 않는다', async () => {
