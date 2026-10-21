@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, nextSort, nextPickSort, pickSort, pickInRect, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, spanKinds, yMax } from '../dashboard/calc.mjs';
+import { downSec, equalize, nextSort, nextPickSort, pickSort, pickInRect, pushSeries, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, spanKinds, sparkPoints, yMax } from '../dashboard/calc.mjs';
 
 test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
   const spans = [
@@ -109,4 +109,34 @@ test('spanKinds: 종류별 건수, 시간 합은 매퍼·SQL·외부만(메서�
     http: { count: 1, ms: 300 }, exception: { count: 1, ms: null },
   });
   assert.deepEqual(spanKinds([]), {});
+});
+
+test('equalize: 구간 경계 1·3·8초, 요청 없는 앱은 0, 목록에 없는 앱은 무시', () => {
+  const active = [999, 1000, 2999, 3000, 7999, 8000].map((elapsed) => ({ agent: 'a', elapsed }));
+  active.push({ agent: 'ghost', elapsed: 10 });
+  assert.deepEqual(equalize(active, ['a', 'b']), [
+    { name: 'a', counts: [1, 2, 2, 1], total: 6 },
+    { name: 'b', counts: [0, 0, 0, 0], total: 0 },
+  ]);
+  assert.deepEqual(equalize([], []), []);
+});
+
+test('sparkPoints: 0은 바닥, 최대값은 천장, 모두 0이면 평평, 값 1개는 오른쪽 끝', () => {
+  assert.equal(sparkPoints([], 100, 28), '');
+  assert.equal(sparkPoints([5], 100, 28), '100,0');
+  assert.equal(sparkPoints([0, 0, 0], 100, 28), '0,28 50,28 100,28');
+  assert.equal(sparkPoints([0, 5, 10], 100, 28), '0,28 50,14 100,0');
+  assert.equal(sparkPoints([1, 2, 3], 100, 28), '0,18.7 50,9.3 100,0');
+});
+
+test('pushSeries: 새 초는 붙이고, 같은 초는 덮어쓰고, 지난 초는 버리고, max를 넘으면 앞에서 버린다', () => {
+  const list = [];
+  pushSeries(list, { sec: 1000, tps: 1 }, 2); // 빈 목록(연결 뒤 처음 나타난 앱)
+  pushSeries(list, { sec: 1000, tps: 5 }, 2);
+  assert.deepEqual(list, [{ sec: 1000, tps: 5 }]);
+  pushSeries(list, { sec: 2000, tps: 2 }, 2);
+  pushSeries(list, { sec: 1000, tps: 9 }, 2); // 늦게 온 지난 초
+  assert.deepEqual(list.map((p) => p.tps), [5, 2]);
+  assert.equal(pushSeries(list, { sec: 3000, tps: 3 }, 2), list);
+  assert.deepEqual(list.map((p) => p.sec), [2000, 3000]);
 });

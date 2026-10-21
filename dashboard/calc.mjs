@@ -89,3 +89,35 @@ export function spanKinds(spans) {
   }
   return out;
 }
+
+// 액티브 이퀄라이저: 앱마다 처리 중 요청을 경과 시간 구간(1·3·8초)별로 센다. names 순서, 요청 없는 앱도 0
+const EQ_EDGES = [1000, 3000, 8000];
+export function equalize(active, names) {
+  const rows = new Map(names.map((name) => [name, { name, counts: [0, 0, 0, 0], total: 0 }]));
+  for (const a of active) {
+    const r = rows.get(a.agent);
+    if (!r) continue;
+    const i = EQ_EDGES.findIndex((edge) => a.elapsed < edge);
+    r.counts[i === -1 ? 3 : i]++;
+    r.total++;
+  }
+  return [...rows.values()];
+}
+
+// 추이선 SVG points. 0은 바닥(h), 그 목록의 최대값은 천장(0). 값 1개면 오른쪽 끝 한 점
+const r1 = (v) => Math.round(v * 10) / 10;
+export function sparkPoints(values, w, h) {
+  const max = Math.max(0, ...values);
+  const step = values.length > 1 ? w / (values.length - 1) : 0;
+  return values.map((v, i) => `${r1(values.length > 1 ? i * step : w)},${r1(max ? h - (v / max) * h : h)}`).join(' ');
+}
+
+// 추이 목록에 1초 통계 붙이기: 같은 초는 덮어쓰고, 지난 초는 버리고, max를 넘으면 앞에서 버린다
+export const SERIES_LEN = 300;
+export function pushSeries(list, entry, max = SERIES_LEN) {
+  const lastSec = list.at(-1)?.sec;
+  if (entry.sec === lastSec) list[list.length - 1] = entry;
+  else if (lastSec === undefined || entry.sec > lastSec) list.push(entry);
+  while (list.length > max) list.shift();
+  return list;
+}
