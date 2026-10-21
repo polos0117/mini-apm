@@ -131,3 +131,6 @@ export function hoverIndex(frac, len, slots = SERIES_LEN) {
   const i = slot - (n - len);
   return i >= 0 && i < len ? i : -1;
 }
+
+// 끈 패널: 저장된 'a,b' 중 names에 있는 이름만(모르는·옛 이름은 버린다)
+export const panelsOff = (saved, names) => new Set(String(saved ?? '').split(',').filter((n) => names.includes(n)));

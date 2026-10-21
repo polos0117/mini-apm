@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, equalize, hoverIndex, nextSort, nextPickSort, pickSort, pickInRect, pushSeries, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, spanKinds, sparkPoints, yMax } from '../dashboard/calc.mjs';
+import { downSec, equalize, hoverIndex, nextSort, panelsOff, nextPickSort, pickSort, pickInRect, pushSeries, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, spanKinds, sparkPoints, yMax } from '../dashboard/calc.mjs';
 
 test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
   const spans = [
@@ -155,4 +155,12 @@ test('hoverIndex: 가로 위치(0~1)를 추이 목록 번호로, 데이터 없�
   assert.equal(hoverIndex(0.5, 3, 300), -1);
   assert.equal(hoverIndex(1.2, 3, 300), 2);      // 범위 밖은 끝으로
   assert.equal(hoverIndex(0.5, 0, 300), -1);
+});
+
+test('panelsOff: 저장된 끈 패널 목록에서 아는 이름만, 순서·중복 무시', () => {
+  const names = ['tps', 'xview', 'eq'];
+  assert.deepEqual([...panelsOff('eq,tps', names)].sort(), ['eq', 'tps']);
+  assert.deepEqual([...panelsOff('eq,eq,nope,,constructor', names)], ['eq']);
+  assert.deepEqual([...panelsOff('', names)], []);
+  assert.deepEqual([...panelsOff(null, names)], []);
 });

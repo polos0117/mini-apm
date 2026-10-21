@@ -1,6 +1,6 @@
 import { createAlerts } from './alerts.mjs';
 import {
-  downSec, equalize, hoverIndex, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, pushSeries, ROUTE_COLS, SERIES_LEN, routeSort, selfTime, slowLevel,
+  downSec, equalize, hoverIndex, nextPickSort, nextSort, panelsOff, PICK_COLS, pickInRect, pickSort, pushSeries, ROUTE_COLS, SERIES_LEN, routeSort, selfTime, slowLevel,
   sortPicked, sortRoutes, spanKinds, sparkPoints, yMax,
 } from './calc.mjs';
 
@@ -409,6 +409,25 @@ function showTab() {
 }
 addEventListener('hashchange', showTab);
 showTab();
+
+// ---- 보기(패널 켜고 끄기) ----
+
+// 끈 패널은 실시간 탭에서 숨기기만 한다. 데이터·경보는 그대로 받는다
+const viewBoxes = [...$('view').querySelectorAll('input')];
+const PANELS = viewBoxes.map((b) => b.value);
+function showView(off) {
+  for (const el of document.querySelectorAll('[data-panel]')) el.classList.toggle('off', off.has(el.dataset.panel));
+  for (const b of viewBoxes) b.checked = !off.has(b.value);
+  $('view').querySelector('summary').textContent = off.size ? `보기 ${PANELS.length - off.size}/${PANELS.length}` : '보기';
+  save('apm.off', [...off].join(','));
+  draw(); // 다시 켠 X-View는 크기가 0이었다
+}
+$('view').onchange = () => showView(new Set(viewBoxes.filter((b) => !b.checked).map((b) => b.value)));
+$('viewAll').onclick = () => showView(new Set());
+document.addEventListener('click', (e) => {
+  if (!$('view').contains(e.target)) $('view').open = false;
+});
+showView(panelsOff(load('apm.off', ''), PANELS));
 
 // ---- 경보 ----
 

@@ -11,7 +11,7 @@
   body { margin: 0; padding: 16px; background: radial-gradient(ellipse at top, #17233b, var(--bg) 70%) fixed var(--bg); min-height: 100vh; color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
   h2 { margin: 0 0 8px; font-size: 12px; color: var(--dim); font-weight: 600; letter-spacing: 0.02em; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); }
-  #tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+  #tiles { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 12px; }
   .tile b { display: block; font-size: 30px; font-weight: 700; line-height: 1.2; color: #f1f5f9; font-variant-numeric: tabular-nums; }
   .tile { border-top: 3px solid var(--c); }
   .tile b.good { color: var(--good); }
@@ -54,7 +54,7 @@
   .bar i.k-http { background: var(--http); }
   .bar i.k-exception, .bar i.err { background: var(--err); }
   .req { margin: -4px 0 8px; color: var(--dim); word-break: break-all; }
-  #status { font-weight: 400; }
+  #status { color: var(--warn); font-size: 13px; }
   #alertbar { display: flex; gap: 12px; align-items: flex-start; background: #3a1418; border: 1px solid var(--err); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
   #alertbar[hidden] { display: none; }
   #alerts { margin: 0; padding: 0; list-style: none; flex: 1; min-width: 0; }
@@ -116,6 +116,19 @@
   #drill > div { min-width: 0; }
   #drill > div > section:last-child { margin-bottom: 0; }
   #detail, #compare { overflow-x: auto; }
+  #view { position: relative; }
+  #view summary { list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; background: var(--panel); color: var(--text); }
+  #view summary::-webkit-details-marker { display: none; }
+  #view summary::after { content: ' ▾'; color: var(--dim); }
+  #view[open] summary { border-color: var(--ok); }
+  #view > div { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; display: grid; gap: 4px; min-width: 220px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); white-space: nowrap; }
+  #view hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
+  /* 끈 패널은 실시간 탭에서만 숨긴다(통계 탭의 고른 트랜잭션·상세는 그대로) */
+  body[data-tab=live] [data-panel].off { display: none !important; }
+  body[data-tab=live] #tiles:not(:has(> :not(.off))), body[data-tab=live] #side:not(:has(> :not(.off))) { display: none; }
+  body[data-tab=live] #main:has(> .off) #side { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  body[data-tab=live] #main:has(> .off), body[data-tab=live] #main:has(#side > .off + .off) { grid-template-columns: minmax(0, 1fr); }
+  body[data-tab=live] #main:has(> .off):has(#side > .off + .off) { display: none; }
   @media (max-width: 1199px) { #drill { grid-template-columns: minmax(0, 1fr); } }
 </style>
 </head>
@@ -124,6 +137,21 @@
   <div id="bar">
     <nav id="tabs"><a href="#live">실시간</a><a href="#stats">API별 통계</a></nav>
     <div id="apps"></div>
+    <details id="view" data-tab="live"><summary>보기</summary><div>
+      <label><input type="checkbox" value="tps"> 초당 처리량(TPS)</label>
+      <label><input type="checkbox" value="avg"> 평균 응답</label>
+      <label><input type="checkbox" value="p95"> 응답 95%(p95)</label>
+      <label><input type="checkbox" value="errors"> 에러</label>
+      <hr>
+      <label><input type="checkbox" value="xview"> X-View</label>
+      <label><input type="checkbox" value="eq"> 액티브 이퀄라이저</label>
+      <label><input type="checkbox" value="active"> 처리 중인 요청</label>
+      <label><input type="checkbox" value="errlist"> 최근 에러</label>
+      <label><input type="checkbox" value="drill"> 고른 트랜잭션·비교·상세</label>
+      <hr>
+      <button id="viewAll">모두 보기</button>
+    </div></details>
+    <span id="status"></span>
     <div id="settings">
       <label><input type="checkbox" id="optErrors"> 에러 경보</label>
       <label><input type="checkbox" id="optDown"> 끊김 경보</label>
@@ -132,23 +160,23 @@
     </div>
   </div>
   <div id="tiles" data-tab="live">
-    <div class="panel tile" style="--c: var(--ok)"><h2>초당 처리량(TPS)<span class="at"></span></h2><b id="tps">-</b><svg class="spark" id="spark-tps" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
-    <div class="panel tile" style="--c: var(--mapper)"><h2>평균 응답(ms)<span class="at"></span></h2><b id="avg">-</b><svg class="spark" id="spark-avg" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
-    <div class="panel tile" style="--c: var(--method)"><h2>응답 95%(p95, ms)<span class="at"></span></h2><b id="p95">-</b><svg class="spark" id="spark-p95" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
-    <div class="panel tile" style="--c: var(--err)"><h2>에러<span class="at"></span></h2><b id="errors">-</b><svg class="spark" id="spark-errors" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
+    <div class="panel tile" data-panel="tps" style="--c: var(--ok)"><h2>초당 처리량(TPS)<span class="at"></span></h2><b id="tps">-</b><svg class="spark" id="spark-tps" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
+    <div class="panel tile" data-panel="avg" style="--c: var(--mapper)"><h2>평균 응답(ms)<span class="at"></span></h2><b id="avg">-</b><svg class="spark" id="spark-avg" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
+    <div class="panel tile" data-panel="p95" style="--c: var(--method)"><h2>응답 95%(p95, ms)<span class="at"></span></h2><b id="p95">-</b><svg class="spark" id="spark-p95" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
+    <div class="panel tile" data-panel="errors" style="--c: var(--err)"><h2>에러<span class="at"></span></h2><b id="errors">-</b><svg class="spark" id="spark-errors" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/><line y1="0" y2="28" visibility="hidden"/></svg></div>
   </div>
   <div id="main" data-tab="live">
-    <div class="panel"><h2>X-View — 영역을 끌어서 고르세요 <span id="legend"></span> <span id="status"></span></h2><canvas id="xview"></canvas></div>
+    <div class="panel" data-panel="xview"><h2>X-View — 영역을 끌어서 고르세요 <span id="legend"></span></h2><canvas id="xview"></canvas></div>
     <div id="side">
-      <div class="panel" style="--c: var(--good)"><h2>액티브 이퀄라이저</h2>
+      <div class="panel" data-panel="eq" style="--c: var(--good)"><h2>액티브 이퀄라이저</h2>
         <div id="eqlegend"><i class="b0"></i>1초 미만 <i class="b1"></i>1~3초 <i class="b2"></i>3~8초 <i class="b3"></i>8초 이상</div>
         <div id="eq">연결된 앱 없음</div></div>
-      <div class="panel" style="--c: var(--warn)"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
+      <div class="panel" data-panel="active" style="--c: var(--warn)"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
     </div>
   </div>
-  <section class="panel" data-tab="live" style="--c: var(--err)"><h2>최근 에러</h2><div id="errlist">없음</div></section>
+  <section class="panel" data-tab="live" data-panel="errlist" style="--c: var(--err)"><h2>최근 에러</h2><div id="errlist">없음</div></section>
   <section class="panel" data-tab="stats" style="--c: var(--method)"><h2>API별 통계 <span id="ranges"><button data-range="10m">최근 10분</button> <button data-range="all">서버 켠 뒤 전체</button></span></h2><div id="routes">없음</div></section>
-  <div id="drill">
+  <div id="drill" data-panel="drill">
     <div>
       <section class="panel" style="--c: var(--mapper)"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
       <section class="panel" data-tab="live" style="--c: var(--warn)"><h2>무엇이 다른가 <span id="cmpinfo"></span></h2><div id="compare">X-View에서 영역을 끌어 고르면 나머지와 비교합니다.</div></section>
