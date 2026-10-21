@@ -129,6 +129,10 @@
   body[data-tab=live] #main:has(> .off) #side { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
   body[data-tab=live] #main:has(> .off), body[data-tab=live] #main:has(#side > .off + .off) { grid-template-columns: minmax(0, 1fr); }
   body[data-tab=live] #main:has(> .off):has(#side > .off + .off) { display: none; }
+  /* 왼쪽(고른·비교) 둘 다, 또는 오른쪽(상세)을 끄면 그 칸을 없애고 한 칸으로 */
+  body[data-tab=live] #drill > div:has(> .off:only-child), body[data-tab=live] #drill > div:has(> .off + .off) { display: none; }
+  body[data-tab=live] #drill:has(> div > .off:only-child), body[data-tab=live] #drill:has(> div > .off + .off) { grid-template-columns: minmax(0, 1fr); }
+  body[data-tab=live] #drill > div > section:has(+ .off) { margin-bottom: 0; }
   @media (max-width: 1199px) { #drill { grid-template-columns: minmax(0, 1fr); } }
 </style>
 </head>
@@ -147,7 +151,10 @@
       <label><input type="checkbox" value="eq"> 액티브 이퀄라이저</label>
       <label><input type="checkbox" value="active"> 처리 중인 요청</label>
       <label><input type="checkbox" value="errlist"> 최근 에러</label>
-      <label><input type="checkbox" value="drill"> 고른 트랜잭션·비교·상세</label>
+      <hr>
+      <label><input type="checkbox" value="picked"> 고른 트랜잭션</label>
+      <label><input type="checkbox" value="compare"> 무엇이 다른가</label>
+      <label><input type="checkbox" value="detail"> 트랜잭션 상세</label>
       <hr>
       <button id="viewAll">모두 보기</button>
     </div></details>
@@ -176,13 +183,13 @@
   </div>
   <section class="panel" data-tab="live" data-panel="errlist" style="--c: var(--err)"><h2>최근 에러</h2><div id="errlist">없음</div></section>
   <section class="panel" data-tab="stats" style="--c: var(--method)"><h2>API별 통계 <span id="ranges"><button data-range="10m">최근 10분</button> <button data-range="all">서버 켠 뒤 전체</button></span></h2><div id="routes">없음</div></section>
-  <div id="drill" data-panel="drill">
+  <div id="drill">
     <div>
-      <section class="panel" style="--c: var(--mapper)"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
-      <section class="panel" data-tab="live" style="--c: var(--warn)"><h2>무엇이 다른가 <span id="cmpinfo"></span></h2><div id="compare">X-View에서 영역을 끌어 고르면 나머지와 비교합니다.</div></section>
+      <section class="panel" data-panel="picked" style="--c: var(--mapper)"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
+      <section class="panel" data-tab="live" data-panel="compare" style="--c: var(--warn)"><h2>무엇이 다른가 <span id="cmpinfo"></span></h2><div id="compare">X-View에서 영역을 끌어 고르면 나머지와 비교합니다.</div></section>
     </div>
     <div>
-      <section class="panel" style="--c: var(--good)"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
+      <section class="panel" data-panel="detail" style="--c: var(--good)"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
     </div>
   </div>
   <script type="module" src="app.mjs"></script>
