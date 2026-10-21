@@ -6,6 +6,7 @@ const MAX_MSG = 200;             // 점에 싣는 에러 메시지 길이
 const MAX_ROUTES = 2000;         // 앱마다 API별 누계 키 수. 넘치면 (기타)
 const OTHER = '(기타)';
 const LOG_STEP = Math.log(1.1);  // 누계 p95용 응답시간 구간(약 10%씩)
+const SERIES_N = 300;            // 추이선 길이(초)
 
 const { compare, routeKey } = require('./compare');
 
@@ -150,6 +151,27 @@ function createStore() {
       const out = {};
       for (const name of seen.keys()) out[name] = summarize(inSec.filter((tx) => tx.agent === name));
       return out;
+    },
+    // 추이선: lastSec까지 n초(오래된 것부터). 보관 중인 트랜잭션을 한 번만 훑어 초별로 나눈다
+    series(lastSec, n = SERIES_N) {
+      const first = lastSec - (n - 1) * 1000;
+      const bySec = new Map();
+      for (const tx of txs) {
+        const e = end(tx);
+        if (e < first || e >= lastSec + 1000) continue;
+        const sec = first + Math.floor((e - first) / 1000) * 1000;
+        if (!bySec.has(sec)) bySec.set(sec, []);
+        bySec.get(sec).push(tx);
+      }
+      const names = [...seen.keys()];
+      const all = [];
+      const byAgent = Object.fromEntries(names.map((name) => [name, []]));
+      for (let sec = first; sec <= lastSec; sec += 1000) {
+        const list = bySec.get(sec) ?? [];
+        all.push({ sec, ...summarize(list) });
+        for (const name of names) byAgent[name].push({ sec, ...summarize(list.filter((tx) => tx.agent === name)) });
+      }
+      return { all, byAgent };
     },
     agents(now = Date.now()) {
       return [...seen].map(([name, a]) => ({ name, ago: now - a.at }));

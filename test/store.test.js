@@ -154,3 +154,36 @@ test('API별 트랜잭션: 그 앱·키만, 느린 순, 특수 문자 키도 그
   assert.deepEqual(s.routeTxs('a', key).map((p) => p.id), ['2', '1']);
   assert.deepEqual(s.routeTxs('a', '(기타)'), []);
 });
+
+test('series: lastSec까지 n초를 오래된 것부터, 요청 없는 1초는 0, 범위 밖은 뺀다', () => {
+  const s = createStore();
+  s.ingest('x', [
+    tx('a', 1000, 0),          // 끝 1000 → 1000초 칸(경계는 그 1초)
+    tx('b', 1500, 499, 'e'),   // 끝 1999 → 1000초 칸
+    tx('c', 1000, 1000),       // 끝 2000 → 2000초 칸
+    tx('d', 0, 999),           // 끝 999 → 범위(1000~3999) 앞
+    tx('e', 4000, 0),          // 끝 4000 → 범위 뒤
+  ], [], 0);
+  const { all } = s.series(3000, 3);
+  assert.deepEqual(all, [
+    { sec: 1000, tps: 2, avg: 250, p95: 499, errors: 1 },
+    { sec: 2000, tps: 1, avg: 1000, p95: 1000, errors: 0 },
+    { sec: 3000, tps: 0, avg: 0, p95: 0, errors: 0 },
+  ]);
+  const { sec, ...rest } = all[1];
+  assert.deepEqual(rest, s.stats(2000)); // 타일과 같은 계산
+});
+
+test('series.byAgent: 앱마다 n개, 그 1초에 없는 앱은 0', () => {
+  const s = createStore();
+  s.ingest('x', [tx('a', 1000, 10)], [], 0);
+  s.ingest('y', [], [], 0);
+  const { byAgent } = s.series(2000, 2);
+  assert.deepEqual(Object.keys(byAgent), ['x', 'y']);
+  assert.deepEqual(byAgent.x.map((p) => [p.sec, p.tps]), [[1000, 1], [2000, 0]]);
+  assert.deepEqual(byAgent.y.map((p) => p.tps), [0, 0]);
+});
+
+test('series: n을 안 주면 300개', () => {
+  assert.equal(createStore().series(300000).all.length, 300);
+});
