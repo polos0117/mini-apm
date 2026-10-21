@@ -9,18 +9,18 @@
     --method: #a78bfa; --mapper: #2dd4bf; --sql: #4ea1ff; --http: #4ade80; }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 16px; background: radial-gradient(ellipse at top, #17233b, var(--bg) 70%) fixed var(--bg); min-height: 100vh; color: var(--text); font: 14px/1.5 system-ui, sans-serif; }
-  h2 { margin: 0 0 8px; font-size: 13px; color: var(--dim); font-weight: 600; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; }
+  h2 { margin: 0 0 8px; font-size: 12px; color: var(--dim); font-weight: 600; letter-spacing: 0.02em; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); }
   #tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
-  .tile b { display: block; font-size: 32px; color: #f1f5f9; font-variant-numeric: tabular-nums; }
+  .tile b { display: block; font-size: 30px; font-weight: 700; line-height: 1.2; color: #f1f5f9; font-variant-numeric: tabular-nums; }
   .tile { border-top: 3px solid var(--c); }
   .tile b.good { color: var(--good); }
   .tile b.warn { color: var(--warn); }
   .tile b.err { color: var(--err); }
   .panel:not(.tile) h2::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--ok)); margin-right: 6px; vertical-align: 1px; }
   #main { display: grid; grid-template-columns: 1fr 340px; gap: 12px; margin-bottom: 12px; }
-  #xview { width: 100%; height: 360px; display: block; cursor: crosshair; touch-action: none; }
-  #active { max-height: 360px; overflow: auto; }
+  #xview { width: 100%; height: 320px; display: block; cursor: crosshair; touch-action: none; }
+  #active { max-height: 200px; overflow: auto; }
   #active table { table-layout: fixed; }
   #active td.num { width: 64px; }
   #active tr:has(+ tr.sub) td { border-bottom: 0; }
@@ -29,6 +29,7 @@
   section { margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-size: 12px; font-weight: 600; background: #141b22; }
   td.text { white-space: normal; word-break: break-all; }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   tr.row { cursor: pointer; }
@@ -76,7 +77,7 @@
   #settings { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--dim); font-size: 13px; }
   #settings input[type=number] { width: 56px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
   #legend { font-weight: 400; margin-left: 8px; }
-  #errlist { max-height: 240px; overflow: auto; }
+  #errlist { max-height: 160px; overflow: auto; }
   #errlist table { table-layout: fixed; }
   #errlist td:nth-child(1) { width: 90px; }
   #errlist td:nth-child(2) { width: 110px; }
@@ -90,6 +91,29 @@
   .pct .track { flex: none; width: 100px; height: 10px; background: #0b0f13; }
   .pct i { display: block; height: 100%; background: var(--ok); }
   .pct.rest i { background: var(--dim); }
+  .spark { display: block; width: 100%; height: 28px; margin-top: 4px; }
+  .spark polyline { fill: none; stroke: var(--c); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .spark polygon { fill: var(--c); opacity: 0.12; }
+  #side { display: grid; gap: 12px; align-content: start; min-width: 0; }
+  #eqlegend { color: var(--dim); font-size: 12px; margin: -4px 0 8px; }
+  #eqlegend i { display: inline-block; width: 8px; height: 8px; margin: 0 2px 0 6px; }
+  #eqlegend i:first-child { margin-left: 0; }
+  #eq { display: flex; gap: 12px; align-items: flex-end; overflow-x: auto; color: var(--dim); }
+  #eq .col { flex: 1 0 48px; max-width: 80px; text-align: center; color: var(--text); }
+  #eq .col b { font-variant-numeric: tabular-nums; }
+  #eq .stack { height: 90px; display: flex; flex-direction: column-reverse; background: #0b0f13; border-radius: 3px; overflow: hidden; }
+  #eq .stack i { display: block; flex: none; }
+  #eq .col.down { opacity: 0.45; }
+  #eq small { display: block; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .b0 { background: var(--good); }
+  .b1 { background: var(--ok); }
+  .b2 { background: var(--warn); }
+  .b3 { background: var(--err); }
+  #drill { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+  #drill > div { min-width: 0; }
+  #drill > div > section:last-child { margin-bottom: 0; }
+  #detail, #compare { overflow-x: auto; }
+  @media (max-width: 1199px) { #drill { grid-template-columns: minmax(0, 1fr); } }
 </style>
 </head>
 <body data-tab="live">
@@ -105,20 +129,31 @@
     </div>
   </div>
   <div id="tiles" data-tab="live">
-    <div class="panel tile" style="--c: var(--ok)"><h2>초당 처리량(TPS)</h2><b id="tps">-</b></div>
-    <div class="panel tile" style="--c: var(--mapper)"><h2>평균 응답(ms)</h2><b id="avg">-</b></div>
-    <div class="panel tile" style="--c: var(--method)"><h2>응답 95%(p95, ms)</h2><b id="p95">-</b></div>
-    <div class="panel tile" style="--c: var(--err)"><h2>에러</h2><b id="errors">-</b></div>
+    <div class="panel tile" style="--c: var(--ok)"><h2>초당 처리량(TPS)</h2><b id="tps">-</b><svg class="spark" id="spark-tps" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/></svg></div>
+    <div class="panel tile" style="--c: var(--mapper)"><h2>평균 응답(ms)</h2><b id="avg">-</b><svg class="spark" id="spark-avg" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/></svg></div>
+    <div class="panel tile" style="--c: var(--method)"><h2>응답 95%(p95, ms)</h2><b id="p95">-</b><svg class="spark" id="spark-p95" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/></svg></div>
+    <div class="panel tile" style="--c: var(--err)"><h2>에러</h2><b id="errors">-</b><svg class="spark" id="spark-errors" viewBox="0 0 100 28" preserveAspectRatio="none"><polygon/><polyline/></svg></div>
   </div>
   <div id="main" data-tab="live">
     <div class="panel"><h2>X-View — 영역을 끌어서 고르세요 <span id="legend"></span> <span id="status"></span></h2><canvas id="xview"></canvas></div>
-    <div class="panel" style="--c: var(--warn)"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
+    <div id="side">
+      <div class="panel" style="--c: var(--good)"><h2>액티브 이퀄라이저</h2>
+        <div id="eqlegend"><i class="b0"></i>1초 미만 <i class="b1"></i>1~3초 <i class="b2"></i>3~8초 <i class="b3"></i>8초 이상</div>
+        <div id="eq">연결된 앱 없음</div></div>
+      <div class="panel" style="--c: var(--warn)"><h2>처리 중인 요청</h2><div id="active">없음</div></div>
+    </div>
   </div>
   <section class="panel" data-tab="live" style="--c: var(--err)"><h2>최근 에러</h2><div id="errlist">없음</div></section>
   <section class="panel" data-tab="stats" style="--c: var(--method)"><h2>API별 통계 <span id="ranges"><button data-range="10m">최근 10분</button> <button data-range="all">서버 켠 뒤 전체</button></span></h2><div id="routes">없음</div></section>
-  <section class="panel" style="--c: var(--mapper)"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
-  <section class="panel" data-tab="live" style="--c: var(--warn)"><h2>무엇이 다른가 <span id="cmpinfo"></span></h2><div id="compare">X-View에서 영역을 끌어 고르면 나머지와 비교합니다.</div></section>
-  <section class="panel" style="--c: var(--good)"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
+  <div id="drill">
+    <div>
+      <section class="panel" style="--c: var(--mapper)"><h2>고른 트랜잭션</h2><table id="picked"></table></section>
+      <section class="panel" data-tab="live" style="--c: var(--warn)"><h2>무엇이 다른가 <span id="cmpinfo"></span></h2><div id="compare">X-View에서 영역을 끌어 고르면 나머지와 비교합니다.</div></section>
+    </div>
+    <div>
+      <section class="panel" style="--c: var(--good)"><h2>트랜잭션 상세</h2><div id="detail">목록에서 한 줄을 누르세요.</div></section>
+    </div>
+  </div>
   <script type="module" src="app.mjs"></script>
 </body>
 </html>
