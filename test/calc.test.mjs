@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { downSec, equalize, nextSort, nextPickSort, pickSort, pickInRect, pushSeries, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, spanKinds, sparkPoints, yMax } from '../dashboard/calc.mjs';
+import { downSec, equalize, hoverIndex, nextSort, nextPickSort, pickSort, pickInRect, pushSeries, routeSort, selfTime, slowLevel, sortPicked, sortRoutes, spanKinds, sparkPoints, yMax } from '../dashboard/calc.mjs';
 
 test('selfTime: 전체 − 맨 바깥(depth 0 또는 없음) 구간 합, 음수면 0', () => {
   const spans = [
@@ -145,4 +145,14 @@ test('sparkPoints: slots를 주면 값을 오른쪽 끝 칸에 맞춘다(연결 
   assert.equal(sparkPoints([1, 1], 100, 28, 5), '75,0 100,0');
   assert.equal(sparkPoints([0, 5, 10], 100, 28, 3), '0,28 50,14 100,0');
   assert.equal(sparkPoints([5], 100, 28, 300), '100,0');
+});
+
+test('hoverIndex: 가로 위치(0~1)를 추이 목록 번호로, 데이터 없는 왼쪽 칸은 -1', () => {
+  assert.equal(hoverIndex(1, 300, 300), 299);
+  assert.equal(hoverIndex(0, 300, 300), 0);
+  assert.equal(hoverIndex(0.5, 300, 300), 150);  // 149.5 반올림
+  assert.equal(hoverIndex(1, 3, 300), 2);        // 늦게 붙은 앱: 오른쪽 끝 3칸만 데이터
+  assert.equal(hoverIndex(0.5, 3, 300), -1);
+  assert.equal(hoverIndex(1.2, 3, 300), 2);      // 범위 밖은 끝으로
+  assert.equal(hoverIndex(0.5, 0, 300), -1);
 });

@@ -1,6 +1,6 @@
 import { createAlerts } from './alerts.mjs';
 import {
-  downSec, equalize, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, pushSeries, ROUTE_COLS, SERIES_LEN, routeSort, selfTime, slowLevel,
+  downSec, equalize, hoverIndex, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, pushSeries, ROUTE_COLS, SERIES_LEN, routeSort, selfTime, slowLevel,
   sortPicked, sortRoutes, spanKinds, sparkPoints, yMax,
 } from './calc.mjs';
 
@@ -28,7 +28,8 @@ let errKey = '';          // 최근 에러 패널에 그린 점 id들. 같으면
 let recent = [];          // 빨간 줄에 보일 경보 문구(최근 MAX_BANNER개)
 let compareSeq = 0;      // 무엇이 다른가: 마지막 요청 번호(늦게 온 이전 응답은 버린다)
 let unacked = 0;          // 확인 안 한 경보 수
-let series = { all: [], byAgent: Object.create(null) }; // 추이선: 전체·앱별 { sec, tps, avg, p95, errors } 최근 300초
+let series = { all: [], byAgent: Object.create(null) };
+let hoverFrac = null; // 타일 위 마우스의 추이선 가로 위치(0~1). 없으면 null // 추이선: 전체·앱별 { sec, tps, avg, p95, errors } 최근 300초
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('xview');
@@ -90,8 +91,7 @@ addEventListener('resize', draw);
 function render() {
   if (!last) return;
   showApps();
-  showStats(selected ? last.agentStats[selected] ?? ZERO : last.stats);
-  showSparks();
+  showTiles();
   showEqualizer();
   showActive(last.active.filter(visible));
   showErrors();
@@ -107,14 +107,37 @@ function track(msg) {
   pushSeries(series.all, { sec: msg.sec, ...msg.stats });
   for (const [name, s] of Object.entries(msg.agentStats)) pushSeries((series.byAgent[name] ??= []), { sec: msg.sec, ...s });
 }
-function showSparks() {
+// 숫자 타일 + 추이선. 마우스가 타일 위면 4개 타일 모두 그 시각의 값·세로선·시각을 보인다
+function showTiles() {
   const list = selected ? series.byAgent[selected] ?? [] : series.all;
+  const i = hoverFrac === null ? -1 : hoverIndex(hoverFrac, list.length);
+  const n = Math.max(SERIES_LEN, list.length);
+  const x = i < 0 ? 0 : (100 * (i + n - list.length)) / (n - 1);
+  showStats(i >= 0 ? list[i] : selected ? last.agentStats[selected] ?? ZERO : last.stats);
+  const at = i < 0 ? '' : new Date(list[i].sec).toTimeString().slice(0, 8);
   for (const key of ['tps', 'avg', 'p95', 'errors']) {
     const pts = sparkPoints(list.map((s) => s[key]), 100, 28, SERIES_LEN);
     const svg = $(`spark-${key}`);
     svg.querySelector('polyline').setAttribute('points', pts);
     svg.querySelector('polygon').setAttribute('points', pts && `${pts.split(',')[0]},28 ${pts} 100,28`); // 첫 점 아래에서 채우기 시작
+    const line = svg.querySelector('line');
+    line.setAttribute('x1', x);
+    line.setAttribute('x2', x);
+    line.setAttribute('visibility', i < 0 ? 'hidden' : 'visible');
+    svg.closest('.tile').querySelector('.at').textContent = at;
   }
+}
+// 추이선이 낮아(28px) 타일 어디에 올려도 가로 위치로 본다
+for (const tile of document.querySelectorAll('.tile')) {
+  tile.addEventListener('mousemove', (e) => {
+    const r = tile.querySelector('.spark').getBoundingClientRect();
+    hoverFrac = (e.clientX - r.left) / r.width;
+    if (last) showTiles();
+  });
+  tile.addEventListener('mouseleave', () => {
+    hoverFrac = null;
+    if (last) showTiles();
+  });
 }
 
 // ---- 액티브 이퀄라이저 ----

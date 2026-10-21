@@ -123,3 +123,11 @@ export function pushSeries(list, entry, max = SERIES_LEN) {
   while (list.length > max) list.shift();
   return list;
 }
+
+// 추이선 위 마우스: 가로 위치(0~1)를 그 목록의 번호로. 오른쪽 끝에 맞춘 slots칸 기준, 데이터 없는 칸은 -1
+export function hoverIndex(frac, len, slots = SERIES_LEN) {
+  const n = Math.max(slots, len);
+  const slot = Math.round(Math.min(1, Math.max(0, frac)) * (n - 1));
+  const i = slot - (n - len);
+  return i >= 0 && i < len ? i : -1;
+}
