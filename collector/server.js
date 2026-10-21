@@ -27,10 +27,13 @@ function createCollector(store = createStore()) {
   const clients = new Set();
   let pending = []; // 다음 틱에 보낼 새 점
 
-  // 스트림 한 번에 보내는 것: 새 점 + 마감된 1초 통계(전체·앱별) + 앱 목록 + 처리 중
-  const snapshot = (points, now) => {
+  // 스트림 한 번에 보내는 것: 그 1초(sec) + 새 점 + 마감된 1초 통계(전체·앱별) + 앱 목록 + 처리 중.
+  // 연결 첫 메시지(withSeries)에만 지난 300초 추이를 더 싣는다
+  const snapshot = (points, now, withSeries = false) => {
     const sec = statSec(now);
-    return sse({ points, stats: store.stats(sec), agentStats: store.agentStats(sec), agents: store.agents(now), active: store.active(now) });
+    const msg = { sec, points, stats: store.stats(sec), agentStats: store.agentStats(sec), agents: store.agents(now), active: store.active(now) };
+    if (withSeries) msg.series = store.series(sec);
+    return sse(msg);
   };
 
   // 본문을 MAX_BODY까지 읽어 JSON 객체면 then(body). 아니면 400
@@ -75,7 +78,7 @@ function createCollector(store = createStore()) {
     // 아직 틱으로 안 나간 점(pending)은 다음 틱에 오므로 과거 점에서 뺀다
     const queued = new Set(pending.map((p) => p.id));
     const backlog = store.points(now - BACKLOG_MS).filter((p) => !queued.has(p.id));
-    res.write(snapshot(backlog, now));
+    res.write(snapshot(backlog, now, true));
     clients.add(res);
     res.on('close', () => clients.delete(res)); // req의 close는 요청 본문이 끝나면 바로 오므로 res로 본다
   }

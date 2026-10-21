@@ -12,6 +12,20 @@ async function start(t) {
 const sample = () => ({ id: 'abc', name: 'GET /a', start: Date.now(), elapsed: 12, status: 200, error: null, spans: [] });
 const post = (base, body) => fetch(`${base}/ingest`, { method: 'POST', body });
 
+// SSE 메시지 하나씩. 큰 메시지는 여러 조각으로 오므로 빈 줄(\n\n)까지 모은다
+function sseReader(res) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  return async () => {
+    while (!buf.includes('\n\n')) buf += dec.decode((await reader.read()).value, { stream: true });
+    const i = buf.indexOf('\n\n');
+    const msg = buf.slice(0, i);
+    buf = buf.slice(i + 2);
+    return JSON.parse(msg.replace(/^data: /, ''));
+  };
+}
+
 test('ingest 후 /tx/:id로 상세를 얻는다', async (t) => {
   const base = await start(t);
   const tx = sample();
@@ -44,8 +58,7 @@ test('stream은 연결 즉시 최근 점을, 이후 1초마다 새 점을 보낸
   const ac = new AbortController();
   const res = await fetch(`${base}/stream`, { signal: ac.signal });
   assert.match(res.headers.get('content-type'), /text\/event-stream/);
-  const reader = res.body.getReader();
-  const next = async () => JSON.parse(new TextDecoder().decode((await reader.read()).value).replace(/^data: /, ''));
+  const next = sseReader(res);
   const first = await next();
   assert.deepEqual(first.points.map((p) => p.id), ['abc']);
   assert.deepEqual(Object.keys(first.stats).sort(), ['avg', 'errors', 'p95', 'tps']);
@@ -59,6 +72,25 @@ test('stream은 연결 즉시 최근 점을, 이후 1초마다 새 점을 보낸
   do tick = await next(); while (tick.points.length === 0);
   ac.abort();
   assert.deepEqual(tick.points.map((p) => p.id), ['def']);
+});
+
+test('stream 첫 메시지에만 지난 300초 series, 모든 메시지에 sec', async (t) => {
+  const base = await start(t);
+  await post(base, JSON.stringify({ agent: 'x', txs: [{ ...sample(), start: Date.now() - 5000 }], active: [] }));
+  const ac = new AbortController();
+  const res = await fetch(`${base}/stream`, { signal: ac.signal });
+  const next = sseReader(res);
+  const first = await next();
+  assert.equal(first.sec % 1000, 0);
+  assert.equal(first.series.all.length, 300);
+  assert.equal(first.series.all.at(-1).sec, first.sec);
+  assert.equal(first.series.all.reduce((n, p) => n + p.tps, 0), 1);
+  assert.deepEqual(Object.keys(first.series.byAgent), ['x']);
+  assert.equal(first.series.byAgent.x.length, 300);
+  const tick = await next();
+  ac.abort();
+  assert.equal(tick.series, undefined);
+  assert.ok(tick.sec >= first.sec);
 });
 
 test('이상한 입력에도 수집 서버가 죽지 않는다', async (t) => {
