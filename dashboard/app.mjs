@@ -1,6 +1,6 @@
 import { createAlerts } from './alerts.mjs';
 import {
-  downSec, equalize, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, pushSeries, ROUTE_COLS, routeSort, selfTime, slowLevel,
+  downSec, equalize, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, pushSeries, ROUTE_COLS, SERIES_LEN, routeSort, selfTime, slowLevel,
   sortPicked, sortRoutes, spanKinds, sparkPoints, yMax,
 } from './calc.mjs';
 
@@ -28,7 +28,7 @@ let errKey = '';          // 최근 에러 패널에 그린 점 id들. 같으면
 let recent = [];          // 빨간 줄에 보일 경보 문구(최근 MAX_BANNER개)
 let compareSeq = 0;      // 무엇이 다른가: 마지막 요청 번호(늦게 온 이전 응답은 버린다)
 let unacked = 0;          // 확인 안 한 경보 수
-let series = { all: [], byAgent: {} }; // 추이선: 전체·앱별 { sec, tps, avg, p95, errors } 최근 300초
+let series = { all: [], byAgent: Object.create(null) }; // 추이선: 전체·앱별 { sec, tps, avg, p95, errors } 최근 300초
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('xview');
@@ -102,17 +102,18 @@ function render() {
 
 // 연결 첫 메시지의 series로 통째로 바꾸고, 매 메시지의 1초 통계를 이어 붙인다
 function track(msg) {
-  if (msg.series) series = { all: msg.series.all, byAgent: { ...msg.series.byAgent } };
+  // 앱 이름이 constructor·toString 같아도 상속 멤버를 집지 않게 프로토타입 없는 객체로
+  if (msg.series) series = { all: msg.series.all, byAgent: Object.assign(Object.create(null), msg.series.byAgent) };
   pushSeries(series.all, { sec: msg.sec, ...msg.stats });
   for (const [name, s] of Object.entries(msg.agentStats)) pushSeries((series.byAgent[name] ??= []), { sec: msg.sec, ...s });
 }
 function showSparks() {
   const list = selected ? series.byAgent[selected] ?? [] : series.all;
   for (const key of ['tps', 'avg', 'p95', 'errors']) {
-    const pts = sparkPoints(list.map((s) => s[key]), 100, 28);
+    const pts = sparkPoints(list.map((s) => s[key]), 100, 28, SERIES_LEN);
     const svg = $(`spark-${key}`);
     svg.querySelector('polyline').setAttribute('points', pts);
-    svg.querySelector('polygon').setAttribute('points', pts && `0,28 ${pts} 100,28`);
+    svg.querySelector('polygon').setAttribute('points', pts && `${pts.split(',')[0]},28 ${pts} 100,28`); // 첫 점 아래에서 채우기 시작
   }
 }
 

@@ -140,3 +140,9 @@ test('pushSeries: 새 초는 붙이고, 같은 초는 덮어쓰고, 지난 초�
   assert.equal(pushSeries(list, { sec: 3000, tps: 3 }, 2), list);
   assert.deepEqual(list.map((p) => p.sec), [2000, 3000]);
 });
+
+test('sparkPoints: slots를 주면 값을 오른쪽 끝 칸에 맞춘다(연결 뒤 나타난 앱의 짧은 추이가 5분처럼 늘어나지 않게)', () => {
+  assert.equal(sparkPoints([1, 1], 100, 28, 5), '75,0 100,0');
+  assert.equal(sparkPoints([0, 5, 10], 100, 28, 3), '0,28 50,14 100,0');
+  assert.equal(sparkPoints([5], 100, 28, 300), '100,0');
+});

@@ -104,12 +104,14 @@ export function equalize(active, names) {
   return [...rows.values()];
 }
 
-// 추이선 SVG points. 0은 바닥(h), 그 목록의 최대값은 천장(0). 값 1개면 오른쪽 끝 한 점
+// 추이선 SVG points. 0은 바닥(h), 그 목록의 최대값은 천장(0).
+// slots칸 중 오른쪽 끝 칸들에 맞춘다(연결 뒤 나타난 앱의 몇 초가 폭 전체로 늘어나지 않게). 값 1개면 오른쪽 끝 한 점
 const r1 = (v) => Math.round(v * 10) / 10;
-export function sparkPoints(values, w, h) {
+export function sparkPoints(values, w, h, slots = values.length) {
   const max = Math.max(0, ...values);
-  const step = values.length > 1 ? w / (values.length - 1) : 0;
-  return values.map((v, i) => `${r1(values.length > 1 ? i * step : w)},${r1(max ? h - (v / max) * h : h)}`).join(' ');
+  const n = Math.max(slots, values.length);
+  const skip = n - values.length;
+  return values.map((v, i) => `${r1(n > 1 ? (w * (i + skip)) / (n - 1) : w)},${r1(max ? h - (v / max) * h : h)}`).join(' ');
 }
 
 // 추이 목록에 1초 통계 붙이기: 같은 초는 덮어쓰고, 지난 초는 버리고, max를 넘으면 앞에서 버린다
