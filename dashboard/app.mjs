@@ -1,7 +1,7 @@
 import { createAlerts } from './alerts.mjs';
 import {
-  downSec, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, ROUTE_COLS, routeSort, selfTime, slowLevel, sortPicked, sortRoutes,
-  spanKinds, yMax,
+  downSec, equalize, nextPickSort, nextSort, PICK_COLS, pickInRect, pickSort, pushSeries, ROUTE_COLS, routeSort, selfTime, slowLevel,
+  sortPicked, sortRoutes, spanKinds, sparkPoints, yMax,
 } from './calc.mjs';
 
 const WINDOW_MS = 5 * 60 * 1000;            // X-View에 보이는 시간
@@ -28,6 +28,7 @@ let errKey = '';          // 최근 에러 패널에 그린 점 id들. 같으면
 let recent = [];          // 빨간 줄에 보일 경보 문구(최근 MAX_BANNER개)
 let compareSeq = 0;      // 무엇이 다른가: 마지막 요청 번호(늦게 온 이전 응답은 버린다)
 let unacked = 0;          // 확인 안 한 경보 수
+let series = { all: [], byAgent: {} }; // 추이선: 전체·앱별 { sec, tps, avg, p95, errors } 최근 300초
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('xview');
@@ -80,6 +81,7 @@ es.onmessage = (e) => {
   const cutoff = Date.now() - WINDOW_MS;
   for (const [id, p] of points) if (p.t < cutoff) points.delete(id);
   last = msg;
+  track(msg);
   raise(alerts.check(msg, Date.now(), opts));
   render();
 };
@@ -89,9 +91,62 @@ function render() {
   if (!last) return;
   showApps();
   showStats(selected ? last.agentStats[selected] ?? ZERO : last.stats);
+  showSparks();
+  showEqualizer();
   showActive(last.active.filter(visible));
   showErrors();
   draw();
+}
+
+// ---- 추이선 ----
+
+// 연결 첫 메시지의 series로 통째로 바꾸고, 매 메시지의 1초 통계를 이어 붙인다
+function track(msg) {
+  if (msg.series) series = { all: msg.series.all, byAgent: { ...msg.series.byAgent } };
+  pushSeries(series.all, { sec: msg.sec, ...msg.stats });
+  for (const [name, s] of Object.entries(msg.agentStats)) pushSeries((series.byAgent[name] ??= []), { sec: msg.sec, ...s });
+}
+function showSparks() {
+  const list = selected ? series.byAgent[selected] ?? [] : series.all;
+  for (const key of ['tps', 'avg', 'p95', 'errors']) {
+    const pts = sparkPoints(list.map((s) => s[key]), 100, 28);
+    const svg = $(`spark-${key}`);
+    svg.querySelector('polyline').setAttribute('points', pts);
+    svg.querySelector('polygon').setAttribute('points', pts && `0,28 ${pts} 100,28`);
+  }
+}
+
+// ---- 액티브 이퀄라이저 ----
+
+const EQ_MIN = 5; // 막대 전체 높이의 최소 건수(1~2건이 꽉 찬 막대로 보이지 않게)
+const EQ_LABELS = ['1초 미만', '1~3초', '3~8초', '8초 이상'];
+function showEqualizer() {
+  const agents = last.agents.filter((a) => !selected || a.name === selected);
+  if (agents.length === 0) return $('eq').replaceChildren('연결된 앱 없음');
+  const rows = equalize(last.active, agents.map((a) => a.name));
+  const top = Math.max(EQ_MIN, ...rows.map((r) => r.total));
+  $('eq').replaceChildren(...rows.map((r, i) => {
+    const down = agents[i].ago > opts.downMs; // 앱 버튼의 ●와 같은 기준
+    const col = document.createElement('div');
+    col.className = down ? 'col down' : 'col';
+    const n = document.createElement('b');
+    n.textContent = r.total;
+    const stack = document.createElement('div');
+    stack.className = 'stack';
+    r.counts.forEach((c, k) => {
+      if (!c) return;
+      const seg = document.createElement('i');
+      seg.className = `b${k}`;
+      seg.style.height = `${(c / top) * 100}%`;
+      seg.title = `${EQ_LABELS[k]} ${c}건`;
+      stack.append(seg);
+    });
+    const name = document.createElement('small');
+    name.textContent = down ? `${r.name} ●` : r.name;
+    name.title = r.name;
+    col.append(n, stack, name);
+    return col;
+  }));
 }
 
 // ---- X-View ----
